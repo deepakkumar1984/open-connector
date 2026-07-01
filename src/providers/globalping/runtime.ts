@@ -121,10 +121,7 @@ async function listProbes(context: ApiKeyProviderContext): Promise<unknown> {
   };
 }
 
-async function createMeasurement(
-  input: Record<string, unknown>,
-  context: ApiKeyProviderContext,
-): Promise<unknown> {
+async function createMeasurement(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   const { payload, response } = await requestGlobalpingJson({
     apiKey: context.apiKey,
     path: "/v1/measurements",
@@ -357,7 +354,7 @@ function assertKnownKeys(value: Record<string, unknown>, keys: string[], path: s
   const allowed = new Set(keys);
   for (const key of Object.keys(value)) {
     if (!allowed.has(key)) {
-      throw new ProviderRequestError(400, `Unrecognized key: "${key}"`);
+      throw new ProviderRequestError(400, `Unrecognized key in ${path}: "${key}"`);
     }
   }
 }
@@ -371,10 +368,7 @@ function assertHttpRequestHeaders(measurementOptions: Record<string, unknown>): 
 
   for (const headerName of Object.keys(headers)) {
     if (reservedHttpRequestHeaders.has(headerName.toLowerCase())) {
-      throw new ProviderRequestError(
-        400,
-        `The ${headerName} header is reserved and cannot be set in request.headers.`,
-      );
+      throw new ProviderRequestError(400, `The ${headerName} header is reserved and cannot be set in request.headers.`);
     }
   }
 }
