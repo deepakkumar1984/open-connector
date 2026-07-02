@@ -2,6 +2,7 @@ import type { CatalogStore } from "../catalog-store.ts";
 import type { OAuth2AuthDefinition, OAuthClientConfigFieldDefinition } from "../core/types.ts";
 
 import { normalizeCredentialValues } from "../core/credential-fields.ts";
+import { assertPublicHttpUrl } from "../core/request.ts";
 
 /**
  * OAuth client configuration supplied by an open-source runtime user.
@@ -118,13 +119,15 @@ export class OAuthClientConfigService {
 
   resolveEndpointUrl(service: string, endpointUrl: string, config: OAuthClientConfig): string {
     this.getOAuthDefinition(service);
-    return endpointUrl.replaceAll(/\{(\+?)([A-Za-z0-9_]+)\}/g, (_match, rawModifier: string, key: string) => {
+    const resolved = endpointUrl.replaceAll(/\{(\+?)([A-Za-z0-9_]+)\}/g, (_match, rawModifier: string, key: string) => {
       const value = config.extra[key];
       if (!value) {
         throw new OAuthClientConfigError("invalid_input", `${key} is required.`);
       }
       return rawModifier === "+" ? value.replace(/\/+$/, "") : encodeURIComponent(value);
     });
+    assertOAuthEndpointUrl(resolved);
+    return resolved;
   }
 
   getOAuthDefinition(service: string): OAuth2AuthDefinition {
@@ -216,4 +219,14 @@ function normalizeStoredOAuthClientConfig(config: OAuthClientConfig | undefined)
     ...config,
     secretExtra: config.secretExtra ?? {},
   };
+}
+
+function assertOAuthEndpointUrl(value: string): void {
+  const url = assertPublicHttpUrl(value, {
+    fieldName: "OAuth endpoint URL",
+    createError: (message) => new OAuthClientConfigError("invalid_input", message),
+  });
+  if (url.protocol !== "https:") {
+    throw new OAuthClientConfigError("invalid_input", "OAuth endpoint URL must use https.");
+  }
 }

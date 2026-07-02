@@ -726,6 +726,9 @@ async function resolveMediaUploadSource(
   }
   if (fileInput) {
     const file = await readTransitFileInput(fileInput, context);
+    if (file.file.size > maxMediaUploadSourceBytes) {
+      throw new ProviderRequestError(400, `upload source exceeds ${maxMediaUploadSourceBytes} bytes`);
+    }
     return {
       bytes: new Uint8Array(await file.file.arrayBuffer()),
       fileName: file.name,

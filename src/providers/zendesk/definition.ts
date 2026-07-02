@@ -1,9 +1,9 @@
 import type { ProviderDefinition } from "../../core/types.ts";
 
 import { zendeskActions } from "./actions.ts";
+import { zendeskOAuthScopes } from "./scopes.ts";
 
 const service = "zendesk";
-const zendeskScopes = ["read", "write"];
 
 export const provider: ProviderDefinition = {
   service,
@@ -16,7 +16,7 @@ export const provider: ProviderDefinition = {
       authorizationUrl: "https://{subdomain}.zendesk.com/oauth/authorizations/new",
       tokenUrl: "https://{subdomain}.zendesk.com/oauth/tokens",
       refreshTokenUrl: "https://{subdomain}.zendesk.com/oauth/tokens",
-      scopes: zendeskScopes,
+      scopes: zendeskOAuthScopes,
       redirectPath: "/oauth/callback/zendesk",
       tokenEndpointAuthMethod: "client_secret_post",
       clientConfigFields: [

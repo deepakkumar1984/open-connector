@@ -17,6 +17,11 @@ const cursorPaginationInputSchema = {
 
 const rawPayloadSchema = s.unknownObject("Raw WorkOS response payload.");
 const metadataObjectSchema = s.unknownObject("Metadata key/value pairs associated with the resource.");
+const organizationMembershipStatuses = ["active", "inactive", "pending"];
+const organizationMembershipStatusSchema = s.stringEnum(
+  "A WorkOS organization membership status.",
+  organizationMembershipStatuses,
+);
 const listMetadataSchema = s.looseObject("WorkOS pagination metadata returned for a list request.", {
   before: s.nullableString("Cursor for the previous page when returned by WorkOS."),
   after: s.nullableString("Cursor for the next page when returned by WorkOS."),
@@ -57,7 +62,7 @@ const organizationMembershipSchema = s.looseObject("WorkOS organization membersh
   userId: s.string("The ID of the WorkOS user."),
   organizationId: s.string("The ID of the WorkOS organization."),
   organizationName: s.string("The name of the WorkOS organization."),
-  status: s.stringEnum("The status of the organization membership.", ["active", "inactive", "pending"]),
+  status: organizationMembershipStatusSchema,
   createdAt: s.string("The timestamp when the organization membership was created."),
   updatedAt: s.string("The timestamp when the organization membership was last updated."),
 });
@@ -243,10 +248,7 @@ export const workosActions: ProviderActionDefinition<WorkosActionName>[] = [
         ...cursorPaginationInputSchema,
         organization_id: s.nonEmptyString("The ID of the organization which the user belongs to."),
         user_id: s.nonEmptyString("The ID of the user."),
-        statuses: s.array(
-          "Statuses to include in the membership list.",
-          s.stringEnum("A WorkOS organization membership status.", ["active", "inactive", "pending"]),
-        ),
+        statuses: s.array("Statuses to include in the membership list.", organizationMembershipStatusSchema),
       },
       { optional: ["before", "after", "limit", "order", "organization_id", "user_id", "statuses"] },
     ),

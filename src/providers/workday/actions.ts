@@ -2,7 +2,12 @@ import type { ProviderActionDefinition } from "../../core/provider-definition.ts
 
 import { s } from "../../core/json-schema.ts";
 import { defineProviderAction } from "../../core/provider-definition.ts";
-import { workdayOAuthScopes, workdayProviderPermissions } from "./scopes.ts";
+import {
+  workdayProviderPermissions,
+  workdayRecruitingReadScopes,
+  workdayStaffingReadScopes,
+  workdayWorkerProfileReadScopes,
+} from "./scopes.ts";
 
 const service = "workday";
 
@@ -91,7 +96,7 @@ export const workdayActions: ProviderActionDefinition[] = [
   defineProviderAction(service, {
     name: "get_current_user",
     description: "Retrieve the current authenticated worker profile from Workday.",
-    requiredScopes: [workdayOAuthScopes[0]],
+    requiredScopes: workdayWorkerProfileReadScopes,
     providerPermissions: [workdayProviderPermissions.workerProfile],
     inputSchema: s.actionInput({}, [], "No input is required for this action."),
     outputSchema: s.actionOutput(
@@ -104,7 +109,7 @@ export const workdayActions: ProviderActionDefinition[] = [
   defineProviderAction(service, {
     name: "list_workers",
     description: "List workers from Workday Staffing with optional search and termination filters.",
-    requiredScopes: [workdayOAuthScopes[1]],
+    requiredScopes: workdayStaffingReadScopes,
     providerPermissions: [workdayProviderPermissions.staffing],
     inputSchema: s.actionInput(
       {
@@ -121,7 +126,7 @@ export const workdayActions: ProviderActionDefinition[] = [
   defineProviderAction(service, {
     name: "get_worker",
     description: "Retrieve one worker by Workday worker identifier from the Staffing API.",
-    requiredScopes: [workdayOAuthScopes[1]],
+    requiredScopes: workdayStaffingReadScopes,
     providerPermissions: [workdayProviderPermissions.staffing],
     inputSchema: s.actionInput(
       {
@@ -135,7 +140,7 @@ export const workdayActions: ProviderActionDefinition[] = [
   defineProviderAction(service, {
     name: "list_jobs",
     description: "List jobs from Workday Staffing.",
-    requiredScopes: [workdayOAuthScopes[1]],
+    requiredScopes: workdayStaffingReadScopes,
     providerPermissions: [workdayProviderPermissions.staffing],
     inputSchema: s.actionInput(
       {
@@ -150,7 +155,7 @@ export const workdayActions: ProviderActionDefinition[] = [
   defineProviderAction(service, {
     name: "get_job",
     description: "Retrieve one job by Workday job identifier from the Staffing API.",
-    requiredScopes: [workdayOAuthScopes[1]],
+    requiredScopes: workdayStaffingReadScopes,
     providerPermissions: [workdayProviderPermissions.staffing],
     inputSchema: s.actionInput(
       {
@@ -164,7 +169,7 @@ export const workdayActions: ProviderActionDefinition[] = [
   defineProviderAction(service, {
     name: "list_job_postings",
     description: "List job postings from Workday Recruiting with optional filters.",
-    requiredScopes: [workdayOAuthScopes[2]],
+    requiredScopes: workdayRecruitingReadScopes,
     providerPermissions: [workdayProviderPermissions.recruiting],
     inputSchema: s.actionInput(
       {
@@ -183,7 +188,7 @@ export const workdayActions: ProviderActionDefinition[] = [
   defineProviderAction(service, {
     name: "get_job_posting",
     description: "Retrieve one job posting by Workday job posting identifier.",
-    requiredScopes: [workdayOAuthScopes[2]],
+    requiredScopes: workdayRecruitingReadScopes,
     providerPermissions: [workdayProviderPermissions.recruiting],
     inputSchema: s.actionInput(
       {

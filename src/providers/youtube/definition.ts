@@ -1,13 +1,9 @@
 import type { ProviderDefinition } from "../../core/types.ts";
 
 import { youtubeActions } from "./actions.ts";
+import { youtubeProviderScopes } from "./scopes.ts";
 
 const service = "youtube";
-
-export const youtubeProviderScopes: string[] = [
-  "https://www.googleapis.com/auth/youtube.readonly",
-  "https://www.googleapis.com/auth/youtube.force-ssl",
-];
 
 export const provider: ProviderDefinition = {
   service,

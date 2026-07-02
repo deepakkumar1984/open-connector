@@ -442,6 +442,24 @@ describe("OAuthFlowService", () => {
     await services.flow.completeAuthorization({ state: started.state, code: "code" });
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("https://tenant.example.com/oauth/tenant%2Fa/token");
   });
+
+  it("rejects OAuth endpoint config values that resolve to local network targets", async () => {
+    const services = createServices([baseUrlOAuthProvider]);
+    await services.clientConfigs.upsertConfig({
+      service: "base_url_oauth",
+      clientId: "client-id",
+      clientSecret: "client-secret",
+      extra: {
+        baseUrl: "http://127.0.0.1:8080",
+        tenant: "tenant",
+      },
+    });
+
+    await expect(services.flow.startAuthorization({ service: "base_url_oauth" })).rejects.toMatchObject({
+      code: "invalid_input",
+      message: "OAuth endpoint URL must not target local hosts",
+    });
+  });
 });
 
 function createServices(providers: ProviderDefinition[]): {

@@ -2,10 +2,9 @@ import type { ProviderActionDefinition } from "../../core/provider-definition.ts
 
 import { s } from "../../core/json-schema.ts";
 import { defineProviderAction } from "../../core/provider-definition.ts";
+import { zendeskReadScope, zendeskReadScopes, zendeskWriteScope, zendeskWriteScopes } from "./scopes.ts";
 
 const service = "zendesk";
-const readPermission = "read";
-const writePermission = "write";
 
 const positiveInteger = (description: string) => s.integer(description, { minimum: 1 });
 const nullableString = (description: string) => s.nullableString(description);
@@ -100,16 +99,16 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "get_current_user",
     description: "Get the current authenticated Zendesk user.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     inputSchema: s.object("Input parameters for reading the current Zendesk user.", {}),
     outputSchema: s.object("Zendesk current user response wrapper.", { user: userSchema }),
   }),
   defineProviderAction(service, {
     name: "list_tickets",
     description: "List Zendesk tickets with offset or cursor pagination.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     inputSchema: s.object(
       "Input parameters for listing Zendesk tickets.",
       {
@@ -128,8 +127,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "get_ticket",
     description: "Get a Zendesk ticket and its comments by identifier.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     followUpActions: ["zendesk.reply_to_ticket"],
     inputSchema: s.object("Input parameters for reading a single Zendesk ticket.", {
       ticketId: positiveInteger("Zendesk ticket identifier."),
@@ -142,8 +141,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "create_ticket",
     description: "Create a Zendesk ticket with an initial comment.",
-    requiredScopes: ["zendesk.write"],
-    providerPermissions: [writePermission],
+    requiredScopes: zendeskWriteScopes,
+    providerPermissions: [zendeskWriteScope],
     followUpActions: ["zendesk.get_ticket"],
     inputSchema: s.object(
       "Input parameters for creating a Zendesk ticket.",
@@ -183,8 +182,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "update_ticket",
     description: "Update fields on an existing Zendesk ticket.",
-    requiredScopes: ["zendesk.write"],
-    providerPermissions: [writePermission],
+    requiredScopes: zendeskWriteScopes,
+    providerPermissions: [zendeskWriteScope],
     inputSchema: s.object(
       "Input parameters for updating a Zendesk ticket.",
       {
@@ -222,8 +221,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "reply_to_ticket",
     description: "Append a public reply or internal note to a Zendesk ticket.",
-    requiredScopes: ["zendesk.write"],
-    providerPermissions: [writePermission],
+    requiredScopes: zendeskWriteScopes,
+    providerPermissions: [zendeskWriteScope],
     inputSchema: s.object(
       "Input parameters for replying to a Zendesk ticket.",
       {
@@ -239,8 +238,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "list_users",
     description: "List Zendesk users with optional role and pagination filters.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     inputSchema: s.object(
       "Input parameters for listing Zendesk users.",
       {
@@ -275,8 +274,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "get_user",
     description: "Get a Zendesk user by identifier.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     inputSchema: s.object("Input parameters for reading a single Zendesk user.", {
       userId: positiveInteger("Zendesk user identifier."),
     }),
@@ -285,8 +284,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "search_users",
     description: "Search Zendesk users by email address or name.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     inputSchema: s.object(
       "Input parameters for searching Zendesk users.",
       {
@@ -307,8 +306,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "list_organizations",
     description: "List Zendesk organizations with pagination.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     inputSchema: s.object(
       "Input parameters for listing Zendesk organizations.",
       {
@@ -325,8 +324,8 @@ export const zendeskActions: ProviderActionDefinition<ZendeskActionName>[] = [
   defineProviderAction(service, {
     name: "get_organization",
     description: "Get a Zendesk organization by identifier.",
-    requiredScopes: ["zendesk.read"],
-    providerPermissions: [readPermission],
+    requiredScopes: zendeskReadScopes,
+    providerPermissions: [zendeskReadScope],
     inputSchema: s.object("Input parameters for reading a single Zendesk organization.", {
       organizationId: positiveInteger("Zendesk organization identifier."),
     }),
