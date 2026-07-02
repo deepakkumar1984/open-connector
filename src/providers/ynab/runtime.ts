@@ -3,6 +3,7 @@ import type { ApiKeyProviderContext, ProviderFetch, ProviderRuntimeHandler } fro
 import type { YnabActionName } from "./actions.ts";
 
 import { compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
+import { encodePathSegment } from "../../core/request.ts";
 import { providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
 
 const ynabApiBaseUrl = "https://api.ynab.com/v1";
@@ -210,8 +211,4 @@ function pickYnabErrorMessage(payload: unknown): string | undefined {
 
 function pickLastKnowledge(input: Record<string, unknown>): Record<string, unknown> {
   return compactObject({ last_knowledge_of_server: input.last_knowledge_of_server });
-}
-
-function encodePathSegment(value: unknown): string {
-  return encodeURIComponent(String(value));
 }

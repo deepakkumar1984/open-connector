@@ -28,6 +28,13 @@ export function queryFlag(value: boolean | undefined): string | undefined {
 }
 
 /**
+ * Encode one provider path segment after converting provider input to string.
+ */
+export function encodePathSegment(value: unknown): string {
+  return encodeURIComponent(String(value));
+}
+
+/**
  * Return a shallow JSON object without undefined values.
  */
 export function jsonObject(input: Record<string, unknown>): Record<string, unknown> {

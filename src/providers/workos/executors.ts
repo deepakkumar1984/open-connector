@@ -3,6 +3,7 @@ import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-
 import type { WorkosActionName } from "./actions.ts";
 
 import { compactObject, optionalBoolean, optionalRecord, optionalString } from "../../core/cast.ts";
+import { encodePathSegment } from "../../core/request.ts";
 import { defineApiKeyProviderExecutors, providerUserAgent, ProviderRequestError } from "../provider-runtime.ts";
 
 const service = "workos";
@@ -330,10 +331,6 @@ function buildOrganizationMembershipBody(input: Record<string, unknown>): Record
     role_slug: optionalString(input.role_slug),
     role_slugs: Array.isArray(input.role_slugs) ? input.role_slugs : undefined,
   });
-}
-
-function encodePathSegment(value: unknown): string {
-  return encodeURIComponent(String(value));
 }
 
 function readWrappedObject(payload: Record<string, unknown>, wrapperKey: string): Record<string, unknown> {

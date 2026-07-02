@@ -3,7 +3,7 @@ import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-
 import type { WizaActionName } from "./actions.ts";
 
 import { optionalRecord, optionalString } from "../../core/cast.ts";
-import { jsonObject } from "../../core/request.ts";
+import { encodePathSegment, jsonObject } from "../../core/request.ts";
 import { ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
 
 type WizaPhase = "validate" | "execute";
@@ -146,8 +146,4 @@ function readErrorMessage(payload: unknown): string | undefined {
     if (message) return message;
   }
   return optionalString(optionalRecord(body.error)?.message) ?? optionalString(optionalRecord(body.status)?.message);
-}
-
-function encodePathSegment(value: unknown): string {
-  return encodeURIComponent(String(value));
 }

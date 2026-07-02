@@ -54,20 +54,22 @@ const businessSummaryProperties = {
   distance: s.number("Distance from the search anchor in meters."),
 };
 
+const businessSummaryOptionalFields = [
+  "imageUrl",
+  "reviewCount",
+  "categories",
+  "rating",
+  "coordinates",
+  "transactions",
+  "price",
+  "location",
+  "phone",
+  "displayPhone",
+  "distance",
+];
+
 const businessSummarySchema = s.object("Normalized Yelp business summary.", businessSummaryProperties, {
-  optional: [
-    "imageUrl",
-    "reviewCount",
-    "categories",
-    "rating",
-    "coordinates",
-    "transactions",
-    "price",
-    "location",
-    "phone",
-    "displayPhone",
-    "distance",
-  ],
+  optional: businessSummaryOptionalFields,
 });
 
 const businessHourEntrySchema = s.object("One Yelp business opening-hours entry.", {
@@ -91,21 +93,7 @@ const businessDetailSchema = s.object(
     hours: s.array("Business opening-hours blocks returned by Yelp.", businessHoursSchema),
   },
   {
-    optional: [
-      "imageUrl",
-      "reviewCount",
-      "categories",
-      "rating",
-      "coordinates",
-      "transactions",
-      "price",
-      "location",
-      "phone",
-      "displayPhone",
-      "distance",
-      "photos",
-      "hours",
-    ],
+    optional: [...businessSummaryOptionalFields, "photos", "hours"],
   },
 );
 

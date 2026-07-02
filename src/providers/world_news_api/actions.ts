@@ -34,6 +34,29 @@ const sourceSchema = s.looseObject("One news source returned by World News API."
   language: s.string("The language code of the news source."),
 });
 
+const searchNewsOptionalFields = [
+  "text",
+  "language",
+  "sourceCountries",
+  "categories",
+  "earliestPublishDate",
+  "latestPublishDate",
+  "newsSources",
+  "authors",
+  "locationFilter",
+  "entities",
+  "sort",
+  "sortDirection",
+  "minSentiment",
+  "maxSentiment",
+  "offset",
+  "number",
+];
+const searchNewsFilterFields = searchNewsOptionalFields.filter(
+  (field) => field !== "sort" && field !== "sortDirection" && field !== "offset" && field !== "number",
+);
+const searchNewsSourcesOptionalFields = ["name", "language", "sourceCountry"];
+
 const searchNewsInputSchema: JsonSchema = {
   ...s.object(
     "Input parameters for searching news articles with World News API.",
@@ -65,41 +88,9 @@ const searchNewsInputSchema: JsonSchema = {
       offset: s.nonNegativeInteger("The zero-based result offset for pagination."),
       number: s.positiveInteger("The maximum number of articles to return.", { maximum: 100 }),
     },
-    {
-      optional: [
-        "text",
-        "language",
-        "sourceCountries",
-        "categories",
-        "earliestPublishDate",
-        "latestPublishDate",
-        "newsSources",
-        "authors",
-        "locationFilter",
-        "entities",
-        "sort",
-        "sortDirection",
-        "minSentiment",
-        "maxSentiment",
-        "offset",
-        "number",
-      ],
-    },
+    { optional: searchNewsOptionalFields },
   ),
-  anyOf: [
-    { required: ["text"] },
-    { required: ["language"] },
-    { required: ["sourceCountries"] },
-    { required: ["categories"] },
-    { required: ["earliestPublishDate"] },
-    { required: ["latestPublishDate"] },
-    { required: ["newsSources"] },
-    { required: ["authors"] },
-    { required: ["locationFilter"] },
-    { required: ["entities"] },
-    { required: ["minSentiment"] },
-    { required: ["maxSentiment"] },
-  ],
+  anyOf: searchNewsFilterFields.map((field) => ({ required: [field] })),
 };
 
 const searchNewsSourcesInputSchema: JsonSchema = {
@@ -113,9 +104,9 @@ const searchNewsSourcesInputSchema: JsonSchema = {
         maxLength: 2,
       }),
     },
-    { optional: ["name", "language", "sourceCountry"] },
+    { optional: searchNewsSourcesOptionalFields },
   ),
-  anyOf: [{ required: ["name"] }, { required: ["language"] }, { required: ["sourceCountry"] }],
+  anyOf: searchNewsSourcesOptionalFields.map((field) => ({ required: [field] })),
 };
 
 export type WorldNewsApiActionName =

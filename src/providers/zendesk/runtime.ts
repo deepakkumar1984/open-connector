@@ -3,7 +3,17 @@ import type { ProviderFetch, ProviderRuntimeHandler } from "../provider-runtime.
 import type { ZendeskActionName } from "./actions.ts";
 
 import { Buffer } from "node:buffer";
-import { compactObject, optionalBoolean, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
+import {
+  compactObject,
+  optionalBoolean,
+  optionalBooleanOrNull,
+  optionalInteger,
+  optionalIntegerOrNull,
+  optionalRecord,
+  optionalString,
+  optionalStringOrNull,
+  positiveInteger,
+} from "../../core/cast.ts";
 import {
   createProviderTimeout,
   isAbortLikeError,
@@ -603,9 +613,7 @@ function requireString(value: unknown, message: string): string {
 }
 
 function requirePositiveInteger(value: unknown, fieldName: string): number {
-  const parsed = optionalInteger(value);
-  if (parsed == null || parsed <= 0) throw new ProviderRequestError(400, `${fieldName} must be a positive integer`);
-  return parsed;
+  return positiveInteger(value, fieldName, (message) => new ProviderRequestError(400, message));
 }
 
 function requireResponseInteger(value: unknown, fieldName: string): number {
@@ -620,15 +628,15 @@ function requireRecord(value: unknown, message: string): Record<string, unknown>
 }
 
 function nullableString(value: unknown): string | null {
-  return typeof value === "string" ? value : null;
+  return optionalStringOrNull(value);
 }
 
 function nullableInteger(value: unknown): number | null {
-  return typeof value === "number" && Number.isInteger(value) ? value : null;
+  return optionalIntegerOrNull(value);
 }
 
 function nullableBoolean(value: unknown): boolean | null {
-  return typeof value === "boolean" ? value : null;
+  return optionalBooleanOrNull(value);
 }
 
 function stringifyArrayQuery(value: unknown): string[] | undefined {
