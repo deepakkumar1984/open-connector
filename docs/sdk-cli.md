@@ -3,6 +3,10 @@
 OpenConnector can be used directly through MCP and HTTP, and it also has dedicated developer tools
 for application and agent workflows.
 
+`oo CLI` support for the OSS runtime is currently being adapted from the commercial version and is
+targeted for mid-July 2026. Until that lands, use the Connector SDK, MCP, HTTP API, OpenAPI, or the
+local Web Console for OSS runtime workflows.
+
 ## Connector SDK
 
 [Connector SDK](https://github.com/oomol-lab/connector-sdk) is the TypeScript client for calling
@@ -38,23 +42,8 @@ runtime authorizes and executes the provider Action.
 workflows. Use it when you want an agent on your machine to discover and call connected account
 capabilities through a consistent command-line entry.
 
-Install on macOS or Linux:
-
-```bash
-curl -fsSL https://cli.oomol.com/install.sh | bash
-```
-
-Install on Windows PowerShell:
-
-```powershell
-irm https://cli.oomol.com/install.ps1 | iex
-```
-
-Then authenticate:
-
-```bash
-oo login
-```
+The commercial-version CLI flow is being migrated to the open-source runtime. This section will add
+OSS-specific setup commands once that compatibility layer is available.
 
 ## Protocol APIs
 

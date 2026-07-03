@@ -11,7 +11,7 @@
 OpenConnector is an open-source auth gateway that connects 643+ providers, supports
 Cloudflare-compatible deployment, and provides 6,680 prebuilt Actions that AI agents can call
 directly through the [Connector SDK](https://github.com/oomol-lab/connector-sdk),
-[oo CLI](https://github.com/oomol-lab/oo-cli), MCP, and HTTP.
+MCP, and HTTP.
 
 OpenConnector does more than store provider credentials. The gateway, provider catalog, and Action
 executors are open source, so developers can self-host the runtime, inspect every Action contract,
@@ -23,6 +23,10 @@ SaaS version already supports 1,000+ SaaS providers; the OSS catalog currently i
 providers and is expanding as we migrate more integrations into maintainable open-source provider
 definitions and executors.
 
+[oo CLI](https://github.com/oomol-lab/oo-cli) support for the OSS runtime is in the same migration
+path from the commercial version and is targeted for mid-July 2026. Until then, use the SDK, MCP,
+HTTP API, OpenAPI, and local Web Console paths below.
+
 ## Why OpenConnector
 
 - [643+ providers and 6,680 prebuilt Actions](docs/providers.md) across SaaS products such as
@@ -32,7 +36,8 @@ definitions and executors.
 - Cloudflare-compatible runtime for fast self-hosted deployment on Workers, D1, R2, and Static
   Assets.
 - Agent-ready access through the [Connector SDK](https://github.com/oomol-lab/connector-sdk),
-  [oo CLI](https://github.com/oomol-lab/oo-cli), MCP, HTTP API, OpenAPI, and a local Web Console.
+  MCP, HTTP API, OpenAPI, and a local Web Console, with
+  [oo CLI](https://github.com/oomol-lab/oo-cli) support in OSS adaptation.
 - Runtime controls for connection identity, scopes, runtime tokens, action allow/block policies,
   temporary file transit, and redacted run logs.
 
@@ -55,7 +60,7 @@ deployment boundaries over time without rewriting the app-facing integration lay
 | Tool                                                        | Use it for                                                                                                    |
 | ----------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
 | [Connector SDK](https://github.com/oomol-lab/connector-sdk) | Call connector Actions, proxy upstream APIs, and inspect the catalog from TypeScript apps and agent runtimes. |
-| [oo CLI](https://github.com/oomol-lab/oo-cli)               | Give local AI agents a command-line entry to discover, inspect, and call connected account capabilities.      |
+| [oo CLI](https://github.com/oomol-lab/oo-cli)               | OSS runtime support is being adapted from the commercial version and is targeted for mid-July 2026.           |
 | MCP                                                         | Expose app Actions to MCP-capable agent hosts through `http://localhost:3000/mcp`.                            |
 | HTTP / OpenAPI                                              | Call `/v1/actions/*` directly or inspect the generated `/openapi.json` document.                              |
 
@@ -75,7 +80,7 @@ and interoperability.
 
 ```mermaid
 flowchart LR
-  Agent["AI Agent / App"] -->|"SDK / CLI / MCP / HTTP"| Gateway["OpenConnector Gateway"]
+  Agent["AI Agent / App"] -->|"SDK / MCP / HTTP"| Gateway["OpenConnector Gateway"]
   Gateway --> Auth["Credential & OAuth Boundary"]
   Gateway --> Catalog["Provider Catalog"]
   Gateway --> Actions["Open-source Action Executors"]
