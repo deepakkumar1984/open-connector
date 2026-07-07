@@ -1,4 +1,9 @@
-import type { CredentialValidators, ExecutionContext, ProviderExecutors } from "../../core/types.ts";
+import type {
+  CredentialValidators,
+  ExecutionContext,
+  ProviderExecutors,
+  ProviderProxyExecutor,
+} from "../../core/types.ts";
 import type { GoogledocsActionName } from "./actions.ts";
 
 import { Buffer } from "node:buffer";
@@ -12,10 +17,16 @@ import {
   googleRequest as googleRequestShared,
   optionalBoolean,
 } from "../googledrive/runtime-shared.ts";
-import { defineProviderExecutors, ProviderRequestError, requireOAuthCredential } from "../provider-runtime.ts";
+import {
+  defineProviderExecutors,
+  defineProviderProxy,
+  ProviderRequestError,
+  requireOAuthCredential,
+} from "../provider-runtime.ts";
 
 const docsApiBaseUrl = "https://docs.googleapis.com/v1";
 const driveApiBaseUrl = "https://www.googleapis.com/drive/v3";
+const googleApiBaseUrl = "https://www.googleapis.com";
 const sheetsApiBaseUrl = "https://sheets.googleapis.com/v4";
 
 type ActionContext = {
@@ -24,6 +35,30 @@ type ActionContext = {
 };
 
 type ActionHandler = (input: Record<string, unknown>, context: ActionContext) => Promise<unknown>;
+
+const docsProxy = defineProviderProxy({
+  service: "googledocs",
+  baseUrl: docsApiBaseUrl,
+  auth: { type: "oauth_bearer" },
+});
+
+const driveProxy = defineProviderProxy({
+  service: "googledocs",
+  baseUrl: driveApiBaseUrl,
+  auth: { type: "oauth_bearer" },
+});
+
+const googleApiProxy = defineProviderProxy({
+  service: "googledocs",
+  baseUrl: googleApiBaseUrl,
+  auth: { type: "oauth_bearer" },
+});
+
+const sheetsProxy = defineProviderProxy({
+  service: "googledocs",
+  baseUrl: sheetsApiBaseUrl,
+  auth: { type: "oauth_bearer" },
+});
 
 type GoogleDocument = Record<string, unknown> & {
   documentId?: string;
@@ -251,6 +286,35 @@ export const executors: ProviderExecutors = defineProviderExecutors<ActionContex
     };
   },
 });
+
+export const proxy: ProviderProxyExecutor = (input, context) => {
+  const path = typeof input.endpoint === "string" ? input.endpoint.split(/[?#]/u)[0] : "";
+  if (path === "/documents" || path.startsWith("/documents/")) {
+    return docsProxy(input, context);
+  }
+  if (path === "/files" || path.startsWith("/files/")) {
+    return driveProxy(input, context);
+  }
+  if (
+    path === "/drive/v3" ||
+    path.startsWith("/drive/v3/") ||
+    path === "/upload/drive/v3" ||
+    path.startsWith("/upload/drive/v3/")
+  ) {
+    return googleApiProxy(input, context);
+  }
+  if (path === "/spreadsheets" || path.startsWith("/spreadsheets/")) {
+    return sheetsProxy(input, context);
+  }
+  return Promise.resolve({
+    ok: false,
+    error: {
+      code: "invalid_input",
+      message: "endpoint is not supported for this provider",
+      details: { status: 400 },
+    },
+  });
+};
 
 export const credentialValidators: CredentialValidators = {
   async oauth2(input, { fetcher }) {

@@ -128,6 +128,29 @@ describe("ProviderLoader proxy executors (H-M)", () => {
     expect((init.headers as Headers).get("authorization")).toBe("Bearer hookdeck-key");
   });
 
+  it("loads registered Hugging Face proxy executors with API key bearer auth", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("huggingface");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    const result = await proxy?.(
+      {
+        endpoint: "/first-rows",
+        method: "GET",
+        query: { dataset: "lhoestq/demo1" },
+      },
+      {
+        getCredential: async () => apiKeyCredential("hf-token"),
+      },
+    );
+
+    expect(result?.ok).toBe(true);
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://datasets-server.huggingface.co/first-rows?dataset=lhoestq%2Fdemo1");
+    expect((init.headers as Headers).get("authorization")).toBe("Bearer hf-token");
+  });
+
   it("loads explicit HTML/CSS to Image proxy executors with user Basic auth", async () => {
     const fetcher = stubProviderFetch();
     const proxy = await new ProviderLoader().loadProxyExecutor("htmlcsstoimage");

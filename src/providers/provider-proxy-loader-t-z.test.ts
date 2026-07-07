@@ -226,6 +226,52 @@ describe("ProviderLoader proxy executors (T-Z)", () => {
     expect((init.headers as Headers).get("authorization")).toBe("Bearer timelink-token");
   });
 
+  it("loads registered TikTok Business proxy executors with OAuth access-token headers", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("tiktok_business");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    const result = await proxy?.(
+      {
+        endpoint: "/open_api/v1.3/oauth2/advertiser/get/",
+        method: "GET",
+      },
+      {
+        getCredential: async () => oauthCredential("tiktok-oauth"),
+      },
+    );
+
+    expect(result?.ok).toBe(true);
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/");
+    expect((init.headers as Headers).get("access-token")).toBe("tiktok-oauth");
+    expect((init.headers as Headers).get("authorization")).toBeNull();
+  });
+
+  it("loads registered TikTok Business proxy executors with API key access-token headers", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("tiktok_business");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    const result = await proxy?.(
+      {
+        endpoint: "/open_api/v1.3/oauth2/advertiser/get/",
+        method: "GET",
+      },
+      {
+        getCredential: async () => apiKeyCredential("tiktok-api-key"),
+      },
+    );
+
+    expect(result?.ok).toBe(true);
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://business-api.tiktok.com/open_api/v1.3/oauth2/advertiser/get/");
+    expect((init.headers as Headers).get("access-token")).toBe("tiktok-api-key");
+    expect((init.headers as Headers).get("authorization")).toBeNull();
+  });
+
   it("loads explicit TinyPNG proxy executors with api basic auth", async () => {
     const fetcher = stubProviderFetch();
     const proxy = await new ProviderLoader().loadProxyExecutor("tinypng");

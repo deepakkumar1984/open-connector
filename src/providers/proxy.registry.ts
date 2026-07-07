@@ -1,10 +1,35 @@
-import type { ProviderProxyExecutor } from "../core/types.ts";
+import type { ExecutionContext, ProviderProxyExecutor } from "../core/types.ts";
 
-import { credentialProviderProxyBaseUrl, defineProviderProxy } from "./provider-runtime.ts";
+import { optionalString } from "../core/cast.ts";
+import {
+  credentialProviderProxyBaseUrl,
+  defineProviderProxy,
+  ProviderRequestError,
+  requireBearerCredential,
+} from "./provider-runtime.ts";
+
+const foremDefaultBaseUrl = "https://dev.to";
 
 function allowedPathPrefixes(...prefixes: string[]): (endpoint: string) => boolean {
   return (endpoint) =>
     prefixes.some((prefix) => endpoint === prefix || endpoint.startsWith(prefix.endsWith("/") ? prefix : `${prefix}/`));
+}
+
+async function foremProxyBaseUrl(context: ExecutionContext, service: string): Promise<string> {
+  const credential = await context.getCredential(service);
+  if (!credential || credential.authType === "no_auth") {
+    throw new ProviderRequestError(401, `Configure ${service} credentials first.`);
+  }
+
+  const apiBaseUrl = optionalString(credential.metadata.apiBaseUrl);
+  if (apiBaseUrl) {
+    return apiBaseUrl.endsWith("/") ? apiBaseUrl.slice(0, -1) : apiBaseUrl;
+  }
+
+  const metadataBaseUrl = optionalString(credential.metadata.baseUrl);
+  const valuesBaseUrl = "values" in credential ? optionalString(credential.values.baseUrl) : undefined;
+  const baseUrl = metadataBaseUrl ?? valuesBaseUrl ?? foremDefaultBaseUrl;
+  return `${baseUrl.endsWith("/") ? baseUrl.slice(0, -1) : baseUrl}/api`;
 }
 
 /** Explicit provider proxy executors. Add entries only after checking provider auth and base URL behavior. */
@@ -29,11 +54,6 @@ export const registeredProxyExecutors: Record<string, ProviderProxyExecutor> = {
     service: "bigpicture_io",
     baseUrl: "https://company.bigpicture.io",
     auth: { type: "api_key_authorization", prefix: "" },
-  }),
-  builder_io: defineProviderProxy({
-    service: "builder_io",
-    baseUrl: "https://builder.io",
-    auth: { type: "api_key_authorization", prefix: "Bearer " },
   }),
   cloudconvert: defineProviderProxy({
     service: "cloudconvert",
@@ -91,11 +111,6 @@ export const registeredProxyExecutors: Record<string, ProviderProxyExecutor> = {
     baseUrl: "https://www.googleapis.com/webmasters/v3",
     auth: { type: "oauth_bearer" },
   }),
-  googledocs: defineProviderProxy({
-    service: "googledocs",
-    baseUrl: "https://www.googleapis.com/drive/v3",
-    auth: { type: "oauth_bearer" },
-  }),
   googledrive: defineProviderProxy({
     service: "googledrive",
     baseUrl: "https://www.googleapis.com",
@@ -135,7 +150,7 @@ export const registeredProxyExecutors: Record<string, ProviderProxyExecutor> = {
   huggingface: defineProviderProxy({
     service: "huggingface",
     baseUrl: "https://datasets-server.huggingface.co",
-    auth: { type: "oauth_bearer" },
+    auth: { type: "bearer" },
   }),
   ip2location: defineProviderProxy({
     service: "ip2location",
@@ -211,7 +226,7 @@ export const registeredProxyExecutors: Record<string, ProviderProxyExecutor> = {
     service: "semantic_scholar",
     baseUrl: "https://api.semanticscholar.org",
     auth: { type: "api_key_header", name: "x-api-key" },
-    allowedEndpoint: allowedPathPrefixes("/graph/v1", "/recommendations/v1"),
+    allowedEndpoint: allowedPathPrefixes("/graph/v1", "/recommendations/v1", "/datasets/v1"),
   }),
   short_io: defineProviderProxy({
     service: "short_io",
@@ -403,7 +418,7 @@ export const registeredProxyExecutors: Record<string, ProviderProxyExecutor> = {
   }),
   forem: defineProviderProxy({
     service: "forem",
-    baseUrl: "https://dev.to",
+    baseUrl: foremProxyBaseUrl,
     auth: { type: "api_key_header", name: "api-key" },
   }),
   formbricks: defineProviderProxy({
@@ -558,18 +573,13 @@ export const registeredProxyExecutors: Record<string, ProviderProxyExecutor> = {
   }),
   posthog: defineProviderProxy({
     service: "posthog",
-    baseUrl: credentialProviderProxyBaseUrl("baseUrl"),
-    auth: { type: "api_key_authorization", prefix: "Bearer " },
+    baseUrl: credentialProviderProxyBaseUrl("baseUrl", "posthog_base_url"),
+    auth: { type: "bearer" },
   }),
   postmark: defineProviderProxy({
     service: "postmark",
     baseUrl: "https://api.postmarkapp.com",
     auth: { type: "api_key_header", name: "x-postmark-server-token" },
-  }),
-  prerender: defineProviderProxy({
-    service: "prerender",
-    baseUrl: "https://api.prerender.io",
-    auth: { type: "api_key_header", name: "prerendertoken" },
   }),
   pushbullet: defineProviderProxy({
     service: "pushbullet",
@@ -704,7 +714,11 @@ export const registeredProxyExecutors: Record<string, ProviderProxyExecutor> = {
   tiktok_business: defineProviderProxy({
     service: "tiktok_business",
     baseUrl: "https://business-api.tiktok.com",
-    auth: { type: "api_key_header", name: "Access-Token" },
+    auth: { type: "none" },
+    async customizeRequest({ context, service, headers }) {
+      const credential = await requireBearerCredential(context, service);
+      headers.set("Access-Token", credential.accessToken);
+    },
   }),
   triple_whale: defineProviderProxy({
     service: "triple_whale",

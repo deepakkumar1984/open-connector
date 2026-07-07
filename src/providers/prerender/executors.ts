@@ -1,8 +1,25 @@
-import type { CredentialValidationResult, ProviderExecutors } from "../../core/types.ts";
+import type {
+  CredentialValidationResult,
+  ProviderProxyExecutor,
+  ProxyExecutionResult,
+  ProxyRequestInput,
+  ProviderExecutors,
+} from "../../core/types.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 
 import { compactObject, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
-import { defineApiKeyProviderExecutors, ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
+import {
+  createProviderProxyUrl,
+  defineApiKeyProviderExecutors,
+  normalizeProviderProxyEndpoint,
+  normalizeProviderProxyHeaders,
+  ProviderRequestError,
+  providerUserAgent,
+  readProviderProxyErrorMessage,
+  readProviderProxyResponse,
+  requireApiKeyCredential,
+  toProviderProxyError,
+} from "../provider-runtime.ts";
 
 const service = "prerender";
 const prerenderApiBaseUrl = "https://api.prerender.io";
@@ -61,6 +78,44 @@ export const prerenderActionHandlers: Record<string, PrerenderActionHandler> = {
 };
 
 export const executors: ProviderExecutors = defineApiKeyProviderExecutors(service, prerenderActionHandlers);
+
+export const proxy: ProviderProxyExecutor = async (
+  input: ProxyRequestInput,
+  context,
+): Promise<ProxyExecutionResult> => {
+  try {
+    const credential = await requireApiKeyCredential(context, service);
+    const endpoint = normalizeProviderProxyEndpoint(input.endpoint);
+    const method = input.method.toUpperCase();
+    const proxyRequest = buildPrerenderProxyRequest(input, endpoint, credential.apiKey, method);
+    const url = createProviderProxyUrl(prerenderApiBaseUrl, proxyRequest.endpoint, input.query);
+    const headers = normalizeProviderProxyHeaders(input.headers);
+    headers.set("user-agent", providerUserAgent);
+
+    const init: RequestInit = {
+      method,
+      headers,
+      signal: context.signal,
+    };
+    if (proxyRequest.body !== undefined) {
+      init.body = typeof proxyRequest.body === "string" ? proxyRequest.body : JSON.stringify(proxyRequest.body);
+      if (!headers.has("content-type") && typeof proxyRequest.body !== "string") {
+        headers.set("content-type", "application/json");
+      }
+    }
+
+    const response = await fetch(url, init);
+    if (!response.ok) {
+      throw new ProviderRequestError(
+        response.status,
+        await readProviderProxyErrorMessage(response, `Prerender request failed with HTTP ${response.status}`),
+      );
+    }
+    return { ok: true, response: await readProviderProxyResponse(response) };
+  } catch (error) {
+    return toProviderProxyError(error, "Prerender request failed");
+  }
+};
 
 export async function validatePrerenderCredential(
   input: Record<string, string>,
@@ -125,6 +180,32 @@ function buildPrerenderUrl(path: string): URL {
 
 function buildCacheClearStatusPath(apiKey: string): string {
   return `/cache-clear-status/${encodeURIComponent(apiKey)}`;
+}
+
+function buildPrerenderProxyRequest(
+  input: ProxyRequestInput,
+  endpoint: string,
+  apiKey: string,
+  method: string,
+): { endpoint: string; body?: unknown } {
+  if (method === "GET" && (endpoint === "/cache-clear-status" || endpoint.startsWith("/cache-clear-status/"))) {
+    return { endpoint: buildCacheClearStatusPath(apiKey) };
+  }
+  if (method === "POST") {
+    return { endpoint, body: buildPrerenderProxyBody(input.body, apiKey) };
+  }
+  return { endpoint, body: input.body };
+}
+
+function buildPrerenderProxyBody(bodyInput: unknown, apiKey: string): Record<string, unknown> {
+  if (bodyInput === undefined) {
+    return { prerenderToken: apiKey };
+  }
+  const body = optionalRecord(bodyInput);
+  if (!body) {
+    throw new ProviderRequestError(400, "Prerender proxy body must be a JSON object");
+  }
+  return { ...body, prerenderToken: apiKey };
 }
 
 async function readPrerenderPayload(response: Response): Promise<unknown> {

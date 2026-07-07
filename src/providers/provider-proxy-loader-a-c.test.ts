@@ -1009,6 +1009,72 @@ describe("ProviderLoader proxy executors (A-C)", () => {
     expect((init.headers as Headers).get("authorization")).toBe("Bearer booqable-token");
   });
 
+  it("loads explicit Builder.io proxy executors for Content API query keys", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("builder_io");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/api/v3/content/page",
+        method: "GET",
+        query: { limit: 1 },
+      },
+      {
+        getCredential: async () => apiKeyCredential("builder-key"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://cdn.builder.io/api/v3/content/page?limit=1&apiKey=builder-key");
+    expect((init.headers as Headers).get("authorization")).toBeNull();
+  });
+
+  it("routes Builder.io Content API endpoints with inline query strings to the CDN API", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("builder_io");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/api/v3/content?limit=1",
+        method: "GET",
+      },
+      {
+        getCredential: async () => apiKeyCredential("builder-key"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://cdn.builder.io/api/v3/content?limit=1&apiKey=builder-key");
+    expect((init.headers as Headers).get("authorization")).toBeNull();
+  });
+
+  it("loads explicit Builder.io proxy executors for Write API bearer auth", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("builder_io");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/api/v1/write/page/content-1",
+        method: "PATCH",
+        body: { name: "Home" },
+      },
+      {
+        getCredential: async () => apiKeyCredential("builder-key"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://builder.io/api/v1/write/page/content-1");
+    expect((init.headers as Headers).get("authorization")).toBe("Bearer builder-key");
+    expect(init.body).toBe(JSON.stringify({ name: "Home" }));
+  });
+
   it("loads explicit Bugsnag proxy executors with token authorization", async () => {
     const fetcher = stubProviderFetch();
     const proxy = await new ProviderLoader().loadProxyExecutor("bugsnag");

@@ -1,9 +1,15 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
-import type { OAuthProviderContext } from "../provider-runtime.ts";
+import type {
+  CredentialValidationResult,
+  CredentialValidators,
+  ExecutionContext,
+  ProviderExecutors,
+} from "../../core/types.ts";
+import type { ProviderFetch } from "../provider-runtime.ts";
 import type { HuggingfaceActionName } from "./actions.ts";
+import type { HuggingfaceActionContext, HuggingfaceCurrentUser } from "./runtime.shared.ts";
 
 import { compactObject } from "../../core/cast.ts";
-import { defineOAuthProviderExecutors } from "../provider-runtime.ts";
+import { defineProviderExecutors, ProviderRequestError } from "../provider-runtime.ts";
 import {
   getHuggingfaceDatasetFirstRows,
   getHuggingfaceDatasetInfo,
@@ -22,7 +28,6 @@ import { getHuggingfaceSpaceInfo, listHuggingfaceRepoFiles, listHuggingfaceSpace
 
 const service = "huggingface";
 
-type HuggingfaceActionContext = OAuthProviderContext;
 type HuggingfaceActionHandler = (input: Record<string, unknown>, context: HuggingfaceActionContext) => Promise<unknown>;
 
 export const huggingfaceActionHandlers: Record<HuggingfaceActionName, HuggingfaceActionHandler> = {
@@ -70,33 +75,80 @@ export const huggingfaceActionHandlers: Record<HuggingfaceActionName, Huggingfac
   },
 };
 
-export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, huggingfaceActionHandlers);
+export const executors: ProviderExecutors = defineProviderExecutors<HuggingfaceActionContext>({
+  service,
+  handlers: huggingfaceActionHandlers,
+  async createContext(context: ExecutionContext, fetcher: ProviderFetch): Promise<HuggingfaceActionContext> {
+    const credential = await context.getCredential(service);
+    if (credential?.authType === "oauth2") {
+      return {
+        authType: "oauth2",
+        accessToken: credential.accessToken,
+        tokenType: credential.tokenType,
+        fetcher,
+        signal: context.signal,
+        transitFiles: context.transitFiles,
+      };
+    }
+    if (credential?.authType === "api_key") {
+      return {
+        authType: "api_key",
+        accessToken: credential.apiKey,
+        tokenType: "Bearer",
+        fetcher,
+        signal: context.signal,
+        transitFiles: context.transitFiles,
+      };
+    }
+    throw new ProviderRequestError(
+      401,
+      "Connect huggingface with OAuth or configure Hugging Face API key credentials first.",
+    );
+  },
+});
 
 export const credentialValidators: CredentialValidators = {
   async oauth2(input, { fetcher, signal }) {
     const user = await readHuggingfaceCurrentUser({
+      authType: "oauth2",
       accessToken: input.accessToken,
       tokenType: input.tokenType,
       fetcher,
       signal,
     });
 
-    return {
-      profile: {
-        accountId: user.id,
-        displayName: user.name ?? user.preferredUsername ?? user.email ?? user.id,
-      },
-      metadata: {
-        currentAccount: compactObject({
-          sub: user.id,
-          preferredUsername: user.preferredUsername,
-          name: user.name,
-          email: user.email,
-          avatarUrl: user.avatarUrl,
-          profileUrl: user.profileUrl,
-          organizations: user.organizations,
-        }),
-      },
-    };
+    return credentialValidationResult(user);
+  },
+
+  async apiKey(input, { fetcher, signal }) {
+    const user = await readHuggingfaceCurrentUser({
+      authType: "api_key",
+      accessToken: input.apiKey,
+      tokenType: "Bearer",
+      fetcher,
+      signal,
+    });
+
+    return credentialValidationResult(user);
   },
 };
+
+function credentialValidationResult(user: HuggingfaceCurrentUser): CredentialValidationResult {
+  return {
+    profile: {
+      accountId: user.id,
+      displayName: user.name ?? user.preferredUsername ?? user.email ?? user.id,
+    },
+    metadata: {
+      currentAccount: compactObject({
+        sub: user.id,
+        preferredUsername: user.preferredUsername,
+        name: user.name,
+        email: user.email,
+        avatarUrl: user.avatarUrl,
+        profileUrl: user.profileUrl,
+        organizations: user.organizations,
+      }),
+    },
+  };
+}

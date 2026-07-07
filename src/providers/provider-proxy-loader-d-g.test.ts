@@ -880,6 +880,28 @@ describe("ProviderLoader proxy executors (D-G)", () => {
     expect(init.body).toBe(JSON.stringify({ jsonrpc: "2.0", method: "tools/list", id: 1 }));
   });
 
+  it("loads explicit Forem proxy executors with configured API base URLs", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("forem");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/articles",
+        method: "GET",
+        query: { page: 1 },
+      },
+      {
+        getCredential: async () => apiKeyCredential("forem-key", { baseUrl: "https://community.example.com" }),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://community.example.com/api/articles?page=1");
+    expect((init.headers as Headers).get("api-key")).toBe("forem-key");
+  });
+
   it("loads explicit Formsite proxy executors with configured API base URLs", async () => {
     const fetcher = stubProviderFetch();
     const proxy = await new ProviderLoader().loadProxyExecutor("formsite");
@@ -1259,6 +1281,71 @@ describe("ProviderLoader proxy executors (D-G)", () => {
     const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
     expect(url.toString()).toBe("https://api.getguru.com/api/v1/whoami");
     expect((init.headers as Headers).get("authorization")).toBe("Basic Z3VydS11c2VyOmd1cnUta2V5");
+  });
+
+  it("loads Google Docs proxy executors with Docs API base URLs", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("googledocs");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/documents/document-1",
+        method: "GET",
+      },
+      {
+        getCredential: async () => oauthCredential("google-docs-token"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://docs.googleapis.com/v1/documents/document-1");
+    expect((init.headers as Headers).get("authorization")).toBe("Bearer google-docs-token");
+  });
+
+  it("loads Google Docs proxy executors with Drive API base URLs", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("googledocs");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/files/file-1/export",
+        method: "GET",
+        query: { mimeType: "application/pdf" },
+      },
+      {
+        getCredential: async () => oauthCredential("google-docs-token"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://www.googleapis.com/drive/v3/files/file-1/export?mimeType=application%2Fpdf");
+    expect((init.headers as Headers).get("authorization")).toBe("Bearer google-docs-token");
+  });
+
+  it("loads Google Docs proxy executors with Sheets API base URLs", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("googledocs");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/spreadsheets/sheet-1",
+        method: "GET",
+        query: { fields: "spreadsheetId" },
+      },
+      {
+        getCredential: async () => oauthCredential("google-docs-token"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://sheets.googleapis.com/v4/spreadsheets/sheet-1?fields=spreadsheetId");
+    expect((init.headers as Headers).get("authorization")).toBe("Bearer google-docs-token");
   });
 
   it("loads explicit Elasticsearch proxy executors with API key auth", async () => {

@@ -1,4 +1,4 @@
-import type { OAuthProviderContext, ProviderFetch } from "../provider-runtime.ts";
+import type { BearerProviderContext, ProviderFetch } from "../provider-runtime.ts";
 
 import {
   compactObject,
@@ -16,6 +16,7 @@ import {
 } from "../provider-runtime.ts";
 
 export const huggingfaceUserinfoUrl = "https://huggingface.co/oauth/userinfo";
+export const huggingfaceWhoamiUrl = "https://huggingface.co/api/whoami-v2";
 export const huggingfaceHubModelsUrl = "https://huggingface.co/api/models";
 export const huggingfaceChatCompletionsUrl = "https://router.huggingface.co/v1/chat/completions";
 export const huggingfaceInferenceBaseUrl = "https://router.huggingface.co/hf-inference/models";
@@ -23,7 +24,9 @@ export const huggingfaceDefaultEmbeddingModel = "sentence-transformers/all-MiniL
 
 const huggingfaceDefaultRequestTimeoutMs = 30_000;
 
-export type HuggingfaceActionContext = OAuthProviderContext;
+export interface HuggingfaceActionContext extends BearerProviderContext {
+  authType: "oauth2" | "api_key";
+}
 
 export interface HuggingfaceCurrentUser {
   id: string;
@@ -48,7 +51,9 @@ interface HuggingfaceRequestJsonInput {
 }
 
 export async function readHuggingfaceCurrentUser(context: HuggingfaceActionContext): Promise<HuggingfaceCurrentUser> {
-  return fetchHuggingfaceCurrentUser(context);
+  return context.authType === "api_key"
+    ? fetchHuggingfaceTokenCurrentUser(context)
+    : fetchHuggingfaceOAuthCurrentUser(context);
 }
 
 export async function listHuggingfaceModels(
@@ -305,17 +310,27 @@ function assertStreamingDisabled(input: Record<string, unknown>): void {
   }
 }
 
-async function fetchHuggingfaceCurrentUser(context: HuggingfaceActionContext): Promise<HuggingfaceCurrentUser> {
+async function fetchHuggingfaceOAuthCurrentUser(context: HuggingfaceActionContext): Promise<HuggingfaceCurrentUser> {
   const payload = await huggingfaceRequestJson<Record<string, unknown>>({
     ...context,
     url: huggingfaceUserinfoUrl,
     mode: "validate",
   });
 
-  return normalizeCurrentUserPayload(payload);
+  return normalizeOAuthCurrentUserPayload(payload);
 }
 
-function normalizeCurrentUserPayload(payload: Record<string, unknown>): HuggingfaceCurrentUser {
+async function fetchHuggingfaceTokenCurrentUser(context: HuggingfaceActionContext): Promise<HuggingfaceCurrentUser> {
+  const payload = await huggingfaceRequestJson<Record<string, unknown>>({
+    ...context,
+    url: huggingfaceWhoamiUrl,
+    mode: "validate",
+  });
+
+  return normalizeTokenCurrentUserPayload(payload);
+}
+
+function normalizeOAuthCurrentUserPayload(payload: Record<string, unknown>): HuggingfaceCurrentUser {
   const user: HuggingfaceCurrentUser = {
     id: requireProviderString(payload.sub, "huggingface userinfo sub"),
   };
@@ -330,6 +345,26 @@ function normalizeCurrentUserPayload(payload: Record<string, unknown>): Huggingf
   const profileUrl = optionalString(payload.profile);
   if (profileUrl) user.profileUrl = profileUrl;
   const organizations = optionalOrganizationList(payload.orgs);
+  if (organizations) user.organizations = organizations;
+  return user;
+}
+
+function normalizeTokenCurrentUserPayload(payload: Record<string, unknown>): HuggingfaceCurrentUser {
+  const user: HuggingfaceCurrentUser = {
+    id: optionalString(payload.id) ?? requireProviderString(payload.name, "huggingface user name"),
+  };
+  const preferredUsername = optionalString(payload.name);
+  if (preferredUsername) {
+    user.preferredUsername = preferredUsername;
+    user.profileUrl = `https://huggingface.co/${preferredUsername}`;
+  }
+  const name = optionalString(payload.fullname) ?? preferredUsername;
+  if (name) user.name = name;
+  const email = optionalString(payload.email);
+  if (email) user.email = email;
+  const avatarUrl = optionalString(payload.avatarUrl) ?? optionalString(payload.picture);
+  if (avatarUrl) user.avatarUrl = avatarUrl;
+  const organizations = optionalOrganizationList(payload.orgs ?? payload.organizations);
   if (organizations) user.organizations = organizations;
   return user;
 }

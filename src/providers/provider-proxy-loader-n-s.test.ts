@@ -193,6 +193,103 @@ describe("ProviderLoader proxy executors (N-S)", () => {
     expect((init.headers as Headers).get("x-key")).toBe("prospeo-key");
   });
 
+  it("loads registered PostHog proxy executors with OAuth bearer auth", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("posthog");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    const result = await proxy?.(
+      {
+        endpoint: "/api/users/@me/",
+        method: "GET",
+      },
+      {
+        getCredential: async () => oauthCredential("posthog-oauth", { posthog_base_url: "https://eu.posthog.com" }),
+      },
+    );
+
+    expect(result?.ok).toBe(true);
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://eu.posthog.com/api/users/@me/");
+    expect((init.headers as Headers).get("authorization")).toBe("Bearer posthog-oauth");
+  });
+
+  it("loads explicit Prerender proxy executors with tokens in JSON bodies", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("prerender");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/recache",
+        method: "POST",
+        body: { urls: ["https://example.com/"], adaptiveType: "desktop" },
+      },
+      {
+        getCredential: async () => apiKeyCredential("prerender-token"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://api.prerender.io/recache");
+    expect((init.headers as Headers).get("prerendertoken")).toBeNull();
+    expect((init.headers as Headers).get("content-type")).toBe("application/json");
+    expect(JSON.parse(String(init.body))).toEqual({
+      urls: ["https://example.com/"],
+      adaptiveType: "desktop",
+      prerenderToken: "prerender-token",
+    });
+  });
+
+  it("normalizes Prerender proxy methods before adding tokens to JSON bodies", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("prerender");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/recache",
+        method: "post",
+        body: { urls: ["https://example.com/"] },
+      },
+      {
+        getCredential: async () => apiKeyCredential("prerender-token"),
+      },
+    );
+
+    const [_url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(init.method).toBe("POST");
+    expect(JSON.parse(String(init.body))).toEqual({
+      urls: ["https://example.com/"],
+      prerenderToken: "prerender-token",
+    });
+  });
+
+  it("loads explicit Prerender proxy executors with cache status tokens in paths", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("prerender");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    await proxy?.(
+      {
+        endpoint: "/cache-clear-status",
+        method: "GET",
+      },
+      {
+        getCredential: async () => apiKeyCredential("prerender-token"),
+      },
+    );
+
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://api.prerender.io/cache-clear-status/prerender-token");
+    expect((init.headers as Headers).get("prerendertoken")).toBeNull();
+    expect(init.body).toBeUndefined();
+  });
+
   it("loads explicit ProxiedMail proxy executors with token headers", async () => {
     const fetcher = stubProviderFetch();
     const proxy = await new ProviderLoader().loadProxyExecutor("proxiedmail");
@@ -796,6 +893,28 @@ describe("ProviderLoader proxy executors (N-S)", () => {
     const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
     expect(url.toString()).toBe("https://sentry.io/api/0/organizations/acme/projects/?cursor=abc");
     expect((init.headers as Headers).get("authorization")).toBe("Bearer sentry-token");
+  });
+
+  it("loads registered Semantic Scholar proxy executors for datasets API endpoints", async () => {
+    const fetcher = stubProviderFetch();
+    const proxy = await new ProviderLoader().loadProxyExecutor("semantic_scholar");
+
+    expect(proxy).toEqual(expect.any(Function));
+
+    const result = await proxy?.(
+      {
+        endpoint: "/datasets/v1/release/latest",
+        method: "GET",
+      },
+      {
+        getCredential: async () => apiKeyCredential("semantic-key"),
+      },
+    );
+
+    expect(result?.ok).toBe(true);
+    const [url, init] = fetcher.mock.calls[0] as [URL, RequestInit];
+    expect(url.toString()).toBe("https://api.semanticscholar.org/datasets/v1/release/latest");
+    expect((init.headers as Headers).get("x-api-key")).toBe("semantic-key");
   });
 
   it("loads explicit ShipBob proxy executors with bearer auth", async () => {
