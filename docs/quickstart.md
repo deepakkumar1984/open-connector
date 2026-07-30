@@ -169,10 +169,21 @@ OOMOL_CONNECT_ENCRYPTION_KEY="replace-with-a-long-random-secret" npm run dev
 
 Set an admin bearer token when the admin API or web console is reachable outside your own shell:
 
+In the terminal running the server, read the value without placing it in shell history:
+
 ```bash
-OOMOL_CONNECT_ADMIN_TOKEN="replace-with-an-admin-token" npm run dev
+read -rsp "Admin token: " OOMOL_CONNECT_ADMIN_TOKEN && printf '\n'
+export OOMOL_CONNECT_ADMIN_TOKEN
+npm run dev
+```
+
+In a second terminal, read the same value and run the probe:
+
+```bash
+read -rsp "Admin token: " OOMOL_CONNECT_ADMIN_TOKEN && printf '\n'
 curl -s http://localhost:3000/api/actions \
-  -H "authorization: Bearer replace-with-an-admin-token"
+  -H "authorization: Bearer $OOMOL_CONNECT_ADMIN_TOKEN"
+unset OOMOL_CONNECT_ADMIN_TOKEN
 ```
 
 Use the admin token for `/api`, `/docs`, and the web console. Create persistent runtime tokens for

@@ -9,7 +9,7 @@ describe("renderOAuthCompletionPage", () => {
     expect(html).toContain("<code>oauth_&lt;example&gt;&quot;</code>");
     expect(html).toContain('"type":"oauth.completed"');
     expect(html).toContain('"service":"oauth_\\u003cexample>\\""');
-    expect(html).toContain("BroadcastChannel");
+    expect(html).toContain('new BroadcastChannel("oomol-connect-oauth")');
     expect(html).not.toContain('<code>oauth_<example>"</code>');
   });
 

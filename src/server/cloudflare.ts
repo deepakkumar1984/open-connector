@@ -12,6 +12,12 @@ import { executableActionIds, executorModules } from "../providers/registry.clou
 import { isConsoleShellPath } from "./api/console-paths.ts";
 import { loadCatalogFromAssets } from "./cloudflare/catalog-assets.ts";
 import { readPositiveInteger, resolvePublicOrigin } from "./cloudflare/cloudflare-env.ts";
+import {
+  createConcealmentResponse,
+  hasValidServiceToken,
+  isAnonymousPublicAllowed,
+  shouldHidePublicSurface,
+} from "./cloudflare/public-exposure-gate.ts";
 import { createConnectApp } from "./connect-app.ts";
 import { KVTransitFileService } from "./files/kv-transit-files.ts";
 import { R2TransitFileService } from "./files/r2-transit-files.ts";
@@ -31,6 +37,14 @@ let cachedApp: { key: string; app: Promise<ConnectApp> } | undefined;
 export default {
   async fetch(request: Request, env: CloudflareEnv, _ctx: CloudflareExecutionContext): Promise<Response> {
     setPrivateNetworkAccessAllowed(parsePrivateNetworkAccessFlag(env.OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK));
+
+    if (shouldHidePublicSurface(env)) {
+      const { pathname } = new URL(request.url);
+      if (!isAnonymousPublicAllowed(request.method, pathname) && !hasValidServiceToken(request, env)) {
+        return createConcealmentResponse();
+      }
+    }
+
     const publicOrigin = resolvePublicOrigin(request, env);
     const cacheKey = createCacheKey(env, publicOrigin);
     if (!cachedApp || cachedApp.key !== cacheKey) {

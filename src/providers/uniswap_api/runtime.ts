@@ -17,7 +17,7 @@ const validationPayload = {
   amount: "1000000",
   tokenInChainId: 1,
   tokenOutChainId: 1,
-  tokenIn: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+  tokenIn: "0xA0b86991c6218b36c1d19d4a2e9eb0ce3606eb48", // gitleaks:allow -- public ERC-20 contract address
   tokenOut: "0x0000000000000000000000000000000000000000",
   swapper: "0x000000000000000000000000000000000000dead",
 };

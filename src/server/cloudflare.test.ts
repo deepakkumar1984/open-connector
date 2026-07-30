@@ -149,6 +149,30 @@ describe("cloudflare worker", () => {
     expect(getResponse.status).toBe(200);
     await expect(getResponse.text()).resolves.toBe("r2-payload");
   });
+
+  it("conceals anonymous requests before app or asset dispatch", async () => {
+    const assets = memoryAssets({
+      "/catalog/apps.json": [provider],
+      "/private-app-route": { exposed: true },
+    });
+    const assetFetch = vi.spyOn(assets, "fetch");
+    const response = await worker.fetch(
+      new Request("https://connect.example.com/private-app-route"),
+      {
+        ...createEnv(),
+        ASSETS: assets,
+        OOMOL_CONNECT_PUBLIC_EXPOSURE: "hidden",
+        OOMOL_CONNECT_ADMIN_TOKEN: "stage-zero-admin-token",
+        OOMOL_CONNECT_RUNTIME_TOKEN: "stage-zero-runtime-token",
+      },
+      createExecutionContext(),
+    );
+
+    expect(response.status).toBe(404);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    expect(await response.text()).toBe("Not Found");
+    expect(assetFetch).not.toHaveBeenCalled();
+  });
 });
 
 function createEnv(): CloudflareEnv {

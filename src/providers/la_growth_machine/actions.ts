@@ -60,7 +60,7 @@ const searchLeadFieldKeys = [
   "companyName",
   "companyUrl",
   "linkedinUrl",
-  "linkedinId",
+  "linkedinId", // gitleaks:allow -- adjacent public field names trigger the LinkedIn-secret rule
   "linkedinPublicId",
   "email",
   "location",
