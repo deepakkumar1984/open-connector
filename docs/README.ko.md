@@ -15,15 +15,27 @@
 
 </div>
 
-OpenConnector는 AI Agent를 위한 오픈 소스 connector gateway이자 Composio의 대안입니다.
+OpenConnector는 AI Agent를 위한 오픈 소스 connector gateway이자 Pipedream/Composio의 대안입니다.
 사용자의 앱 계정을 한 번 연결하면 1,000개 이상의 provider와 10,000개 이상의 사전 구축된 Action을
 Agent와 애플리케이션에 공통 catalog로 제공할 수 있습니다.
 
-> [!IMPORTANT]
-> **OAuth를 바로 사용하고 싶으신가요?** [OOMOL hosted connector](https://oomol.com/apps)는 지원되는
-> provider의 OAuth app을 미리 구성해 두어 사용자가 즉시 계정을 승인할 수 있습니다. 또한 매월 제공되는
-> Connect credits로 사용량에 따라 약 15,000~20,000회의 호출을 무료로 이용할 수 있습니다. Self-hosted
-> OpenConnector도 OAuth를 지원하지만 OAuth app은 직접 등록하고 구성해야 합니다.
+<table>
+  <tr>
+    <td width="33.33%" align="center"><img src="../assets/deployment-options/oomol.svg" alt="OOMOL" width="140"></td>
+    <td width="33.33%" align="center"><img src="../assets/deployment-options/cloudflare.svg" alt="Cloudflare" width="140"></td>
+    <td width="33.33%" align="center"><img src="../assets/deployment-options/self-hosted.svg" alt="Self-hosted" width="140"></td>
+  </tr>
+  <tr>
+    <td width="33.33%" valign="top">Managed OAuth와 hosted runtime을 바로 사용할 수 있습니다. 배포하거나 OAuth app을 설정할 필요가 없습니다.</td>
+    <td width="33.33%" valign="top">Cloudflare 계정에서 Workers, D1, R2, Static Assets를 사용합니다. 배포와 OAuth app은 직접 관리합니다.</td>
+    <td width="33.33%" valign="top">Docker 또는 Node.js로 로컬이나 자체 인프라에서 실행합니다. Storage와 OAuth app은 직접 관리합니다.</td>
+  </tr>
+  <tr>
+    <td width="33.33%" align="center">🚀 <a href="https://oomol.com/docs/connector-saas/"><strong>OOMOL Hosted</strong></a></td>
+    <td width="33.33%" align="center"><a href="cloudflare.md"><strong>Cloudflare에 배포</strong></a></td>
+    <td width="33.33%" align="center"><a href="https://oomol.com/docs/openconnector-self-hosting/"><strong>Self-host</strong></a></td>
+  </tr>
+</table>
 
 애플리케이션 코드에서는 [Connector SDK](https://github.com/oomol-lab/connector-sdk), 로컬 Agent
 relay에는 [oo CLI](https://github.com/oomol-lab/oo-cli), Agent host에는 MCP, custom client에는

@@ -324,7 +324,7 @@ async function getMeetingInfo(input: Record<string, unknown>, request: FeishuJso
 function buildEventBody(input: Record<string, unknown>, required: boolean) {
   const body: Record<string, unknown> = {};
   assignString(body, "summary", input.summary, required);
-  assignString(body, "description", input.description);
+  assignString(body, "description_rich", input.description);
   assignScalar(body, "visibility", input.visibility);
   assignScalar(body, "attendee_ability", input.attendeeAbility);
   assignScalar(body, "free_busy_status", input.freeBusyStatus);

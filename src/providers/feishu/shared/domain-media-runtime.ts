@@ -286,7 +286,7 @@ async function uploadSlidesMedia(input: Record<string, unknown>, deps: FeishuDom
 }
 
 async function getSlidesScreenshots(input: Record<string, unknown>, deps: FeishuDomainMediaRuntimeDeps) {
-  const presentationId = await resolveSlidesPresentation(input, deps.request);
+  const presentationId = requireString(input.presentationToken, "presentationToken");
   const slideIds = optionalStringArray(input.slideIds);
   const slideNumbers = optionalNumberArray(input.slideNumbers);
   const count = (slideIds?.length ?? 0) + (slideNumbers?.length ?? 0);

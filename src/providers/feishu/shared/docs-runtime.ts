@@ -1,6 +1,6 @@
 import type { FeishuJsonRequest } from "./client.ts";
 
-import { optionalRecord } from "../../../core/cast.ts";
+import { optionalRecord, optionalStringArray } from "../../../core/cast.ts";
 import { ProviderRequestError } from "../../provider-runtime.ts";
 
 interface FeishuDocsActionHandler {
@@ -288,10 +288,6 @@ function optionalNumber(value: unknown) {
 function optionalIntegerString(value: unknown) {
   const number = optionalNumber(value);
   return number == null ? undefined : String(number);
-}
-
-function optionalStringArray(value: unknown) {
-  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 }
 
 function invalidInput(message: string) {

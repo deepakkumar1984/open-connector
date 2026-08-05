@@ -2,7 +2,7 @@ import type { CredentialValidationResult } from "../../core/types.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 import type { RaiselyActionName } from "./actions.ts";
 
-import { optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
+import { optionalRecord, optionalString, optionalStringArray, requiredString } from "../../core/cast.ts";
 import {
   createProviderTimeout,
   isAbortSignalError,
@@ -370,11 +370,4 @@ function readErrorMessage(payload: Record<string, unknown>): string | undefined 
     optionalString(payload.error) ??
     optionalString(optionalRecord(payload.error)?.message)
   );
-}
-
-function optionalStringArray(value: unknown): string[] | undefined {
-  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
-    return undefined;
-  }
-  return value;
 }

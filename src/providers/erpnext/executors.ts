@@ -310,7 +310,7 @@ function normalizeBaseUrl(value: unknown, allowPrivateNetwork: boolean = isPriva
     createError: (message) => new ProviderRequestError(400, message),
   });
 
-  if (url.protocol !== "https:") {
+  if (url.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "baseUrl must use HTTPS");
   }
   if (url.username || url.password) {

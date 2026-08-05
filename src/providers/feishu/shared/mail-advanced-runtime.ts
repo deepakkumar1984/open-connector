@@ -216,6 +216,9 @@ async function updateMailTemplate(input: Record<string, unknown>, request: Feish
 }
 
 async function triageMailMessages(input: Record<string, unknown>, request: FeishuJsonRequest) {
+  if (input.unread === false) {
+    throw invalidInput("unread must be true when provided");
+  }
   const mailboxId = optionalString(input.mailboxId) ?? "me";
   const maximum = Math.min(optionalNumber(input.maxResults) ?? 20, 400);
   const parsedToken = parseTriageToken(optionalString(input.pageToken));

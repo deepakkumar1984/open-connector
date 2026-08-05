@@ -314,7 +314,7 @@ function parseBarkPushUrl(value: string, allowPrivateNetwork: boolean): BarkCred
     return undefined;
   }
 
-  if (url.protocol !== "https:") {
+  if (url.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "Bark push URL must use https");
   }
 
@@ -342,7 +342,7 @@ function normalizeBarkBaseUrl(value?: string, allowPrivateNetwork: boolean = isP
     createError: (message) => new ProviderRequestError(400, message),
   });
 
-  if (url.protocol !== "https:") {
+  if (url.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "Bark baseUrl must use https");
   }
 

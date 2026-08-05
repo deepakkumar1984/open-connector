@@ -121,6 +121,7 @@
   },
   "providers": {
     "catalogTitle": "提供商",
+    "brandNotice": "第三方名称、标志及商标归其各自权利人所有，此处仅用于识别对应的提供商。本项目不主张拥有相关权利。再分发本项目或将其用于商业用途的用户，应自行查阅适用的品牌规范，并按其具体用途取得所需许可。",
     "searchPlaceholder": "搜索提供商",
     "statusFilterLabel": "提供商状态",
     "filters": {
@@ -246,6 +247,10 @@
     "execution": {
       "executable": "可执行",
       "catalogOnly": "仅目录"
+    },
+    "categoryFilterLabel": "分类",
+    "categories": {
+      "all": "所有分类"
     }
   },
   "actions": {

@@ -20,6 +20,7 @@ OpenConnector is configured with environment variables.
 | `OOMOL_CONNECT_ALLOWED_PROXIES`          | unset                     | Comma-separated provider proxy allowlist. Supports service names and `*`.      |
 | `OOMOL_CONNECT_BLOCKED_PROXIES`          | unset                     | Comma-separated provider proxy denylist. Supports service names and `*`.       |
 | `OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK`    | `false`                   | Allow self-hosted provider connections to target private networks. See below.  |
+| `OOMOL_CONNECT_LOG_LEVEL`                | `info`                    | Pino log level for the local Node server.                                      |
 | `OOMOL_CONNECT_TRANSIT_FILE_TTL_SECONDS` | `86400`                   | Transit file lifetime before cleanup.                                          |
 | `OOMOL_CONNECT_TRANSIT_FILE_MAX_BYTES`   | `104857600`               | Maximum transit file upload size.                                              |
 | `OOMOL_CONNECT_RUN_LIMIT`                | `5000`                    | Maximum number of recent action run audit records to retain.                   |
@@ -81,12 +82,14 @@ private targets are rejected during connection setup.
 
 Some self-hosted services are only reachable over a LAN or an overlay network
 such as Tailscale or NetBird. To allow those connections, set
-`OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK=true`. When enabled, provider connections
-that opt in (currently **Dokploy**) may target:
+`OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK=true`. When enabled, connections for the
+self-hosted providers that opt in (**Dokploy**, **n8n**, **GitLab**,
+**Gitea**, **Home Assistant**, **IMAP Mailbox**, and others) may target:
 
 - RFC 1918 ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
 - Carrier-grade NAT / shared address space `100.64.0.0/10` (Tailscale, NetBird)
 - Private hostname suffixes: `.local`, `.internal`, `.home`, `.lan`
+- Plain `http://` instance URLs, for providers that otherwise require HTTPS
 
 The following targets stay blocked even when the flag is enabled:
 

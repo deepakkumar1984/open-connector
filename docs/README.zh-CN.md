@@ -15,14 +15,27 @@
 
 </div>
 
-OpenConnector 是面向 AI Agent 的开源 connector gateway，也是 Composio 的开源替代方案。
+OpenConnector 是面向 AI Agent 的开源 connector gateway，也是 Pipedream/Composio 的开源替代方案。
 连接一次用户应用账号，就可以把包含 1,000+ 个 provider 和 10,000+ 个预置 Action 的共享 catalog 暴露给
 Agent 和应用。
 
-> [!IMPORTANT]
-> **希望 OAuth 开箱即用？** [OOMOL 官方托管 Connector](https://oomol.com/apps) 已为支持的 provider
-> 配置好 OAuth 应用，用户可以直接授权；每月赠送的 Connect 点数约可支持 15,000–20,000 次免费调用，实际次数
-> 取决于具体用量。自托管 OpenConnector 同样支持 OAuth，但需要自行申请和配置 OAuth 应用。
+<table>
+  <tr>
+    <td width="33.33%" align="center"><img src="../assets/deployment-options/oomol.svg" alt="OOMOL" width="140"></td>
+    <td width="33.33%" align="center"><img src="../assets/deployment-options/cloudflare.svg" alt="Cloudflare" width="140"></td>
+    <td width="33.33%" align="center"><img src="../assets/deployment-options/self-hosted.svg" alt="自托管" width="140"></td>
+  </tr>
+  <tr>
+    <td width="33.33%" valign="top">托管 OAuth 和 runtime，开箱即用。无需部署或配置 OAuth 应用。</td>
+    <td width="33.33%" valign="top">在你的 Cloudflare 账号中使用 Workers、D1、R2 和 Static Assets。部署和 OAuth 应用由你负责管理。</td>
+    <td width="33.33%" valign="top">使用 Docker 或 Node.js 在本地或自己的基础设施中运行。存储和 OAuth 应用由你负责管理。</td>
+  </tr>
+  <tr>
+    <td width="33.33%" align="center">🚀 <a href="https://oomol.com/docs/connector-saas/"><strong>OOMOL 托管</strong></a></td>
+    <td width="33.33%" align="center"><a href="cloudflare.md"><strong>部署到 Cloudflare</strong></a></td>
+    <td width="33.33%" align="center"><a href="https://oomol.com/docs/openconnector-self-hosting/"><strong>自托管</strong></a></td>
+  </tr>
+</table>
 
 应用代码使用 [Connector SDK](https://github.com/oomol-lab/connector-sdk)，本地 Agent 使用
 [oo CLI](https://github.com/oomol-lab/oo-cli) 中继，Agent host 使用 MCP，自定义客户端使用

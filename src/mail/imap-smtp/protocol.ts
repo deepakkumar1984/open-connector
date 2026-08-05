@@ -1,4 +1,6 @@
+import type { GuardedFetchDnsLookup, ResolvedAddress } from "../../core/guarded-fetch.ts";
 import type { FetchMessageObject, ImapFlowOptions, MessageStructureObject, SearchObject } from "imapflow";
+import type { LookupFunction, Socket, TcpNetConnectOpts } from "node:net";
 
 import { ImapFlow } from "imapflow";
 import { simpleParser } from "mailparser";
@@ -6,11 +8,14 @@ import { Buffer } from "node:buffer";
 import { randomUUID } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
+import { connect as connectSocket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import nodemailer from "nodemailer";
+import { resolveGuardedEgressTarget } from "../../core/guarded-fetch.ts";
+import { isIpAddress, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
 import { mailAttachmentDownloadByteLimit, mailConnectionTimeoutMs, mailImapPort, mailSmtpPort } from "./config.ts";
 import { MailProtocolError } from "./errors.ts";
 import { sanitizeTempFileName } from "./temp-files.ts";
@@ -20,11 +25,25 @@ export interface MailCredential {
   authorizationCode: string;
   imapHost: string;
   smtpHost: string;
+  /**
+   * Submission port, when the mailbox does not offer implicit TLS on 465.
+   * Providers with a hardcoded host leave it unset and keep 465.
+   */
+  smtpPort?: number;
 }
 
 export interface MailProtocolConfig {
   displayName: string;
   attachmentFallbackPrefix: string;
+  /**
+   * Screen the resolved IP addresses of the mailbox hosts before connecting.
+   *
+   * Providers whose hosts are hardcoded do not need this: their hostnames are
+   * part of the integration. It is meant for providers whose hosts come from
+   * user input, where a save-time hostname check alone can be defeated by a DNS
+   * record that only points at an internal address once the connection is made.
+   */
+  enforceHostNetworkPolicy?: boolean;
 }
 
 export interface MailSendInput {
@@ -176,6 +195,8 @@ export interface MailProtocol {
 export interface MailProtocolDependencies {
   createSmtpTransport?: (config: Record<string, unknown>) => MailSmtpTransport;
   createImapClient?: (config: Record<string, unknown>) => MailImapClient;
+  lookup?: GuardedFetchDnsLookup;
+  connectSocket?: (options: TcpNetConnectOpts) => Socket;
 }
 
 interface MailSmtpTransport {
@@ -245,7 +266,7 @@ export function createMailProtocol(config: MailProtocolConfig, deps: MailProtoco
       });
     },
     async validateSmtpCredential(credential) {
-      const transport = createSmtpTransport(deps, credential);
+      const transport = await createSmtpTransport(config, deps, credential);
       try {
         await transport.verify();
       } catch (error) {
@@ -255,7 +276,7 @@ export function createMailProtocol(config: MailProtocolConfig, deps: MailProtoco
       }
     },
     async sendMail(credential, input) {
-      const transport = createSmtpTransport(deps, credential);
+      const transport = await createSmtpTransport(config, deps, credential);
       try {
         const result = await transport.sendMail({
           from: credential.email,
@@ -462,11 +483,70 @@ async function moveMessageToFolder(client: RuntimeImapClient, uid: number, targe
   }
 }
 
-function createSmtpTransport(deps: MailProtocolDependencies, credential: MailCredential): MailSmtpTransport {
-  const config = {
-    host: credential.smtpHost,
-    port: mailSmtpPort,
-    secure: true,
+interface MailHostTarget {
+  host: string;
+  servername?: string;
+  lookup?: LookupFunction;
+}
+
+async function pinMailHost(
+  host: string,
+  fieldName: string,
+  config: MailProtocolConfig,
+  deps: MailProtocolDependencies,
+): Promise<MailHostTarget> {
+  if (!config.enforceHostNetworkPolicy) {
+    return { host };
+  }
+
+  const target = await resolveGuardedEgressTarget(`https://${host}`, {
+    fieldName,
+    createError: (message) => new MailProtocolError("blocked_host", message),
+    createResolutionError: (message) => new MailProtocolError("network", message),
+    allowPrivateNetwork: isPrivateNetworkAccessAllowed(),
+    lookup: deps.lookup,
+  });
+  if (target.addresses.length === 0) {
+    throw new MailProtocolError("network", `${fieldName} could not be resolved for validation.`);
+  }
+  return {
+    host: target.url.hostname,
+    ...(!isIpAddress(target.url.hostname) ? { servername: target.url.hostname } : {}),
+    lookup: createPinnedLookup(target.addresses),
+  };
+}
+
+function createPinnedLookup(addresses: ResolvedAddress[]): LookupFunction {
+  return ((_hostname, options, callback) => {
+    if (typeof options === "object" && options.all) {
+      callback(null, addresses);
+      return;
+    }
+    const first = addresses[0]!;
+    callback(null, first.address, first.family);
+  }) as LookupFunction;
+}
+
+async function createSmtpTransport(
+  config: MailProtocolConfig,
+  deps: MailProtocolDependencies,
+  credential: MailCredential,
+): Promise<MailSmtpTransport> {
+  const target = await pinMailHost(credential.smtpHost, "SMTP host", config, deps);
+  const port = credential.smtpPort ?? mailSmtpPort;
+  const transportConfig = {
+    host: target.host,
+    ...(target.servername ? { servername: target.servername } : {}),
+    port,
+    ...(target.lookup ? { getSocket: createSmtpSocketFactory(target.host, port, target.lookup, deps) } : {}),
+    // Implicit TLS is the wire convention on 465 only. Every other submission
+    // port starts in cleartext and upgrades, so STARTTLS is demanded rather than
+    // taken opportunistically: nodemailer then aborts instead of sending the
+    // password in the clear to a server that does not offer the upgrade. The
+    // flag stays off for implicit TLS, where it would only make a server whose
+    // EHLO fails unusable rather than falling back to HELO as before.
+    secure: port === mailSmtpPort,
+    requireTLS: port !== mailSmtpPort,
     auth: {
       user: credential.email,
       pass: credential.authorizationCode,
@@ -477,13 +557,20 @@ function createSmtpTransport(deps: MailProtocolDependencies, credential: MailCre
   };
 
   return deps.createSmtpTransport
-    ? deps.createSmtpTransport(config)
-    : (nodemailer.createTransport(config as never) as MailSmtpTransport);
+    ? deps.createSmtpTransport(transportConfig)
+    : (nodemailer.createTransport(transportConfig as never) as MailSmtpTransport);
 }
 
-function createImapClient(deps: MailProtocolDependencies, credential: MailCredential): MailImapClient {
-  const config = {
-    host: credential.imapHost,
+async function createImapClient(
+  config: MailProtocolConfig,
+  deps: MailProtocolDependencies,
+  credential: MailCredential,
+): Promise<MailImapClient> {
+  const target = await pinMailHost(credential.imapHost, "IMAP host", config, deps);
+  const clientConfig = {
+    host: target.host,
+    ...(target.servername ? { servername: target.servername } : {}),
+    ...(target.lookup ? { tls: { lookup: target.lookup, autoSelectFamily: true } } : {}),
     port: mailImapPort,
     secure: true,
     auth: {
@@ -496,7 +583,39 @@ function createImapClient(deps: MailProtocolDependencies, credential: MailCreden
     logger: false,
   };
 
-  return deps.createImapClient ? deps.createImapClient(config) : new ImapFlow(config as ImapFlowOptions);
+  return deps.createImapClient ? deps.createImapClient(clientConfig) : new ImapFlow(clientConfig as ImapFlowOptions);
+}
+
+function createSmtpSocketFactory(host: string, port: number, lookup: LookupFunction, deps: MailProtocolDependencies) {
+  return (_options: unknown, callback: (error: Error | null, options?: { connection: Socket }) => void): void => {
+    const socket = (deps.connectSocket ?? connectSocket)({ host, port, lookup, autoSelectFamily: true });
+    let settled = false;
+
+    const finish = (error?: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      socket.removeListener("connect", onConnect);
+      socket.removeListener("error", onError);
+      socket.removeListener("timeout", onTimeout);
+      socket.setTimeout(0);
+      callback(error ?? null, error ? undefined : { connection: socket });
+    };
+    const onConnect = (): void => finish();
+    const onError = (error: Error): void => finish(error);
+    const onTimeout = (): void => {
+      const error = new Error("Connection timeout") as NodeJS.ErrnoException;
+      error.code = "ETIMEDOUT";
+      socket.destroy();
+      finish(error);
+    };
+
+    socket.once("connect", onConnect);
+    socket.once("error", onError);
+    socket.once("timeout", onTimeout);
+    socket.setTimeout(mailConnectionTimeoutMs);
+  };
 }
 
 async function withImapClient<T>(
@@ -505,7 +624,7 @@ async function withImapClient<T>(
   credential: MailCredential,
   callback: (client: RuntimeImapClient) => Promise<T>,
 ) {
-  const client = createImapClient(deps, credential);
+  const client = await createImapClient(config, deps, credential);
   let connected = false;
   try {
     await client.connect();

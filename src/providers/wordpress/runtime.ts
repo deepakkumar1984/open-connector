@@ -168,7 +168,7 @@ export function normalizeWordpressSiteUrl(
     throw new ProviderRequestError(400, "siteUrl must be a valid absolute URL");
   }
 
-  if (parsed.protocol !== "https:") {
+  if (parsed.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "siteUrl must use https");
   }
 

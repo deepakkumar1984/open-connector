@@ -307,7 +307,7 @@ async function validateDiscourseCredential(
  * Private/overlay-network targets (RFC 1918, Tailscale, NetBird, private
  * hostnames) are only accepted when the deployment opts in through
  * `OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK`; otherwise the shared public-only SSRF
- * guard applies. https is always required regardless of the opt-in.
+ * guard applies. Plain HTTP is accepted only with the private-network opt-in.
  * `allowPrivateNetwork` may be passed explicitly (used by tests).
  */
 export function normalizeDiscourseBaseUrl(
@@ -332,7 +332,7 @@ export function normalizeDiscourseBaseUrl(
     throw new ProviderRequestError(400, "baseUrl must be a valid URL");
   }
 
-  if (url.protocol !== "https:") {
+  if (url.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "baseUrl must use https");
   }
 

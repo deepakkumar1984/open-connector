@@ -31,6 +31,8 @@ import { apiDelete, apiPost, apiPut } from "./api";
 import {
   credentialFieldsFor,
   filterProviders,
+  filterProvidersByCategory,
+  providerCategoryCounts,
   resolveProviderConnectionStatus,
   sortProviders,
   usableConnectionsForService,
@@ -40,6 +42,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 
@@ -149,7 +152,8 @@ function ProviderBrowser(props: ProviderBrowserProps): ReactNode {
   const t = useTranslate();
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<ProviderStatusFilter>("all");
-  const resetKey = providerBrowserResetKey(query, statusFilter);
+  const [categoryFilter, setCategoryFilter] = useState<string>("all");
+  const resetKey = providerBrowserResetKey(query, statusFilter, categoryFilter);
   const statusByService = useMemo(
     () =>
       new Map(
@@ -174,7 +178,9 @@ function ProviderBrowser(props: ProviderBrowserProps): ReactNode {
     [credentialConnectionsByService, props.data.providers],
   );
   const searchedProviders = filterProviders(sortedProviders, query);
-  const visibleProviders = filterProvidersByStatus(searchedProviders, statusFilter, statusByService);
+  const categoryFilteredProviders = filterProvidersByCategory(searchedProviders, categoryFilter);
+  const statusFilteredProviders = filterProvidersByStatus(searchedProviders, statusFilter, statusByService);
+  const visibleProviders = filterProvidersByCategory(statusFilteredProviders, categoryFilter);
   const {
     hasMore: hasMoreProviders,
     limit: visibleLimit,
@@ -182,19 +188,31 @@ function ProviderBrowser(props: ProviderBrowserProps): ReactNode {
   } = useProgressiveProviderLimit(visibleProviders.length, resetKey);
   const loadMoreProvidersRef = useIntersectionLoader(hasMoreProviders, loadMoreProviders);
   const renderedProviders = visibleProviders.slice(0, visibleLimit);
-  const filtersActive = query.trim().length > 0 || statusFilter !== "all";
+  const filtersActive = query.trim().length > 0 || statusFilter !== "all" || categoryFilter !== "all";
   const statusCounts = useMemo(
     () =>
       providerStatusOptions.map((option) => ({
         ...option,
-        count: countProvidersForStatus(searchedProviders, option.id, statusByService),
+        count: countProvidersForStatus(categoryFilteredProviders, option.id, statusByService),
       })),
-    [searchedProviders, statusByService],
+    [categoryFilteredProviders, statusByService],
+  );
+  const categoryCounts = useMemo(() => providerCategoryCounts(statusFilteredProviders), [statusFilteredProviders]);
+  const categoryOptions = useMemo(
+    () =>
+      [
+        ...categoryCounts.entries(),
+        ...(categoryFilter !== "all" && !categoryCounts.has(categoryFilter) ? [[categoryFilter, 0] as const] : []),
+      ]
+        .sort((left, right) => left[0].localeCompare(right[0]))
+        .map(([category, count]) => ({ category, count })),
+    [categoryCounts, categoryFilter],
   );
 
   function resetFilters(): void {
     setQuery("");
     setStatusFilter("all");
+    setCategoryFilter("all");
   }
 
   return (
@@ -217,13 +235,18 @@ function ProviderBrowser(props: ProviderBrowserProps): ReactNode {
 
       <ProviderCollectionBar
         counts={statusCounts}
+        categoryOptions={categoryOptions}
+        categoryFilter={categoryFilter}
         filtersActive={filtersActive}
         providerCount={visibleProviders.length}
         selected={statusFilter}
         totalProviderCount={props.data.providers.length}
         onReset={resetFilters}
         onSelect={setStatusFilter}
+        onSelectCategory={setCategoryFilter}
       />
+
+      <p className="provider-brand-notice">{t("providers.brandNotice")}</p>
 
       {visibleProviders.length === 0 ? (
         <div className="provider-empty-row">
@@ -321,12 +344,15 @@ function useIntersectionLoader(enabled: boolean, onLoad: () => void): (node: HTM
 
 function ProviderCollectionBar(props: {
   counts: Array<{ id: ProviderStatusFilter; labelKey: string; count: number }>;
+  categoryOptions: Array<{ category: string; count: number }>;
+  categoryFilter: string;
   filtersActive: boolean;
   providerCount: number;
   selected: ProviderStatusFilter;
   totalProviderCount: number;
   onReset(): void;
   onSelect(value: ProviderStatusFilter): void;
+  onSelectCategory(value: string): void;
 }): ReactNode {
   const t = useTranslate();
 
@@ -343,7 +369,7 @@ function ProviderCollectionBar(props: {
           <ToggleGroupItem
             key={option.id}
             value={option.id}
-            className="h-8 gap-2 rounded-md border px-3 text-sm data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90 data-[state=on]:[&>span:last-child]:text-primary-foreground/70 [&>span:last-child]:text-xs [&>span:last-child]:text-muted-foreground [&>span:last-child]:tabular-nums"
+            className="h-8 gap-2 rounded-md border px-3 text-sm data-[state=on]:border-primary data-[state=on]:bg-primary data-[state=on]:text-primary-foreground data-[state=on]:hover:bg-primary/90 data-[state=on]:[&>span:last-child]:text-primary-foreground/70 [&>span:last-child]:min-w-8 [&>span:last-child]:text-right [&>span:last-child]:text-xs [&>span:last-child]:text-muted-foreground [&>span:last-child]:tabular-nums"
             disabled={option.count === 0 && option.id !== "all"}
           >
             <span>{t(option.labelKey)}</span>
@@ -351,6 +377,23 @@ function ProviderCollectionBar(props: {
           </ToggleGroupItem>
         ))}
       </ToggleGroup>
+      <Select value={props.categoryFilter} onValueChange={props.onSelectCategory}>
+        <SelectTrigger
+          className="h-8 w-48 rounded-md border px-3 text-sm"
+          size="sm"
+          aria-label={t("providers.categoryFilterLabel")}
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent className="p-1" position="popper" align="start">
+          <SelectItem value="all">{t("providers.categories.all")}</SelectItem>
+          {props.categoryOptions.map((option) => (
+            <SelectItem key={option.category} value={option.category}>
+              {option.category} ({compactProviderCount(option.count)})
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <div className="provider-result-meta">
         <span>
           {t("providers.resultCount", {
@@ -387,9 +430,14 @@ function ProviderCard(props: ProviderCardProps): ReactNode {
     <div className="provider-card" style={providerCardStyle}>
       <Link className="provider-card-main" to={to}>
         <ProviderIcon provider={props.provider} />
-        <span className="provider-card-title-row">
-          <span className="provider-card-title">{props.provider.displayName || props.provider.service}</span>
-          <ProviderStatusBadges status={props.status} locallyAvailable={locallyAvailable} compact />
+        <span className="provider-card-info">
+          <span className="provider-card-title-row">
+            <span className="provider-card-title">{props.provider.displayName || props.provider.service}</span>
+            <ProviderStatusBadges status={props.status} locallyAvailable={locallyAvailable} compact />
+          </span>
+          {props.provider.description ? (
+            <span className="provider-card-description">{props.provider.description}</span>
+          ) : null}
         </span>
       </Link>
       <Link
@@ -1387,8 +1435,8 @@ function countProvidersForStatus(
   return filterProvidersByStatus(providers, status, statusByService).length;
 }
 
-export function providerBrowserResetKey(query: string, status: ProviderStatusFilter): string {
-  return `${query}\u0000${status}`;
+export function providerBrowserResetKey(query: string, status: ProviderStatusFilter, category: string): string {
+  return `${query}\u0000${status}\u0000${category}`;
 }
 
 function compactProviderCount(value: number): string {

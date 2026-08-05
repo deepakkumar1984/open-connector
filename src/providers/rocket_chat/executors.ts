@@ -8,7 +8,6 @@ import type {
 } from "../../core/types.ts";
 import type { RocketChatActionName } from "./actions.ts";
 
-import { isIP } from "node:net";
 import { compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
 import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
 import {
@@ -389,14 +388,11 @@ function normalizeRocketChatBaseUrl(
     allowPrivateNetwork,
     createError: (message) => new ProviderRequestError(400, message),
   });
-  if (url.protocol !== "https:") {
+  if (url.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "baseUrl must use https");
   }
   if (url.username || url.password) {
     throw new ProviderRequestError(400, "baseUrl must not include credentials");
-  }
-  if (!allowPrivateNetwork) {
-    validateRocketChatHostname(url.hostname);
   }
   url.hash = "";
   url.search = "";
@@ -408,44 +404,6 @@ function normalizeRocketChatBaseUrl(
     url.pathname = "";
   }
   return url.toString().endsWith("/") ? url.toString().slice(0, -1) : url.toString();
-}
-
-function validateRocketChatHostname(hostname: string): void {
-  const normalizedHostname = hostname.toLowerCase();
-  const ipVersion = isIP(normalizedHostname);
-  if (
-    (ipVersion === 4 && isRestrictedIpv4Host(normalizedHostname)) ||
-    (ipVersion === 6 && isRestrictedIpv6Host(normalizedHostname))
-  ) {
-    throw new ProviderRequestError(400, "baseUrl must not use a private IP address");
-  }
-}
-
-function isRestrictedIpv4Host(hostname: string): boolean {
-  const octets = hostname.split(".").map((part) => Number.parseInt(part, 10));
-  if (octets.length !== 4 || octets.some((part) => !Number.isInteger(part))) {
-    return false;
-  }
-  const [first = 0, second = 0] = octets;
-  return (
-    first === 10 ||
-    first === 127 ||
-    first === 0 ||
-    (first === 100 && second >= 64 && second <= 127) ||
-    (first === 169 && second === 254) ||
-    (first === 172 && second >= 16 && second <= 31) ||
-    (first === 192 && second === 168)
-  );
-}
-
-function isRestrictedIpv6Host(hostname: string): boolean {
-  return (
-    hostname === "::1" ||
-    hostname === "::" ||
-    hostname.startsWith("fc") ||
-    hostname.startsWith("fd") ||
-    hostname.startsWith("fe80:")
-  );
 }
 
 function buildRocketChatApiBaseUrl(baseUrl: string): string {

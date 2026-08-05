@@ -121,6 +121,7 @@
   },
   "providers": {
     "catalogTitle": "服務提供者",
+    "brandNotice": "第三方名稱、標誌及商標歸其各自權利人所有，此處僅用於識別對應的服務提供者。本專案不主張擁有相關權利。再散布本專案或將其用於商業用途的使用者，應自行查閱適用的品牌規範，並依其具體用途取得所需許可。",
     "searchPlaceholder": "搜尋服務提供者",
     "statusFilterLabel": "服務提供者狀態",
     "filters": {
@@ -246,6 +247,10 @@
     "execution": {
       "executable": "可執行",
       "catalogOnly": "僅供目錄查閱"
+    },
+    "categoryFilterLabel": "分類",
+    "categories": {
+      "all": "所有分類"
     }
   },
   "actions": {

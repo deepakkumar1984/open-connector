@@ -121,6 +121,7 @@
   },
   "providers": {
     "catalogTitle": "Providers",
+    "brandNotice": "Third-party names, logos, and trademarks belong to their respective owners and are displayed only to identify the corresponding providers. This project does not claim ownership of them. Users who redistribute or commercialize this project are responsible for reviewing the applicable brand guidelines and obtaining any permissions required for their intended use.",
     "searchPlaceholder": "Search providers",
     "statusFilterLabel": "Provider status",
     "filters": {
@@ -246,6 +247,10 @@
     "execution": {
       "executable": "Executable",
       "catalogOnly": "Catalog only"
+    },
+    "categoryFilterLabel": "Category",
+    "categories": {
+      "all": "All categories"
     }
   },
   "actions": {

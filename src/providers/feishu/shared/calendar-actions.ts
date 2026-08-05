@@ -63,7 +63,7 @@ const attendee = s.object(
 );
 const eventFields = {
   summary: s.string("The event title.", { minLength: 1 }),
-  description: s.string("The event description."),
+  description: s.string("The event description in Feishu Markdown."),
   startTime: timeValue,
   endTime: timeValue,
   timezone: s.string("The IANA timezone used by the start and end times."),

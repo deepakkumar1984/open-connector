@@ -346,7 +346,7 @@ function resolveSnipeItUrls(
   rawInstanceUrl: unknown,
   allowPrivateNetwork: boolean = isPrivateNetworkAccessAllowed(),
 ): { instanceUrl: string; apiBaseUrl: string } {
-  const instanceUrl = normalizeSnipeItInstanceUrl(rawInstanceUrl);
+  const instanceUrl = normalizeSnipeItInstanceUrl(rawInstanceUrl, allowPrivateNetwork);
   assertPublicHttpUrl(instanceUrl, {
     fieldName: "instanceUrl",
     allowPrivateNetwork,
@@ -358,7 +358,7 @@ function resolveSnipeItUrls(
   };
 }
 
-function normalizeSnipeItInstanceUrl(rawInstanceUrl: unknown): string {
+function normalizeSnipeItInstanceUrl(rawInstanceUrl: unknown, allowPrivateNetwork: boolean): string {
   const trimmed = optionalString(rawInstanceUrl);
   if (!trimmed) {
     throw new ProviderRequestError(400, "instanceUrl is required");
@@ -373,7 +373,7 @@ function normalizeSnipeItInstanceUrl(rawInstanceUrl: unknown): string {
     throw new ProviderRequestError(400, "instanceUrl must be a valid URL");
   }
 
-  if (url.protocol !== "https:") {
+  if (url.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "instanceUrl must use https");
   }
   if (url.username || url.password) {

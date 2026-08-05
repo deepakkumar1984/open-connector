@@ -138,7 +138,7 @@ export function normalizeDatalustBaseUrl(
     createError: credentialError,
     allowPrivateNetwork,
   });
-  if (url.protocol !== "https:") {
+  if (url.protocol !== "https:" && !allowPrivateNetwork) {
     throw credentialError("baseUrl must use HTTPS");
   }
   if (url.username || url.password || url.search || url.hash) {

@@ -1,6 +1,6 @@
 .provider-browser-panel {
   min-height: 0;
-  overflow: hidden;
+  overflow: clip;
   border: 1px solid var(--border);
   border-radius: 8px;
   background: var(--card);
@@ -25,7 +25,6 @@
 .provider-collection-bar {
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 12px;
   padding: 8px 16px;
   border-bottom: 1px solid var(--border);
@@ -33,7 +32,7 @@
 
 .provider-filter-list {
   display: flex;
-  flex: 1;
+  flex: 0 1 auto;
   min-width: 0;
   gap: 8px;
   overflow-x: auto;
@@ -41,6 +40,7 @@
 
 .provider-result-meta {
   display: flex;
+  flex: none;
   align-items: center;
   justify-content: flex-end;
   flex-wrap: wrap;
@@ -82,9 +82,24 @@
 .provider-card-title-row {
   display: flex;
   align-items: center;
-  flex: 1;
   min-width: 0;
   gap: 8px;
+}
+
+.provider-card-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 2px;
+}
+
+.provider-card-description {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--muted-foreground);
 }
 
 .provider-card-title {
@@ -142,6 +157,25 @@
   grid-column: 1 / -1;
   justify-content: center;
   padding: 12px;
+}
+
+.provider-brand-notice {
+  position: sticky;
+  z-index: 2;
+  top: 56px;
+  margin: 0;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in oklab, var(--card) 94%, var(--muted));
+  color: var(--muted-foreground);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+@media (max-width: 960px) {
+  .provider-brand-notice {
+    position: static;
+  }
 }
 
 .provider-empty-row {

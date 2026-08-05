@@ -88,6 +88,8 @@ export interface ProviderExecutorDefinition<TContext> {
   handlers: Record<string, ProviderRuntimeHandler<TContext>>;
   createContext: ProviderRuntimeContextFactory<TContext>;
   fallbackMessage?: string;
+  /** Override the standard execution-error mapping when the provider exposes stable native error codes. */
+  mapError?: (error: unknown) => ExecutionResult;
   /** Deployment-gated private-network opt-in applied to this provider's egress fetch (currently Dokploy). */
   allowPrivateNetwork?: () => boolean;
   /** Skip the redundant DNS resolved-address check; only for hardcoded-host providers. */
@@ -109,6 +111,7 @@ export interface ApiKeyProviderContext {
 export interface OAuthProviderContext {
   accessToken: string;
   tokenType?: string;
+  providerSecret?: Record<string, unknown>;
   fetcher: ProviderFetch;
   transitFiles?: TransitFileWriter;
   signal?: AbortSignal;
@@ -183,6 +186,8 @@ export interface ProviderProxyRequestCustomizationInput {
   url: URL;
   headers: Headers;
   credential?: ResolvedCredential;
+  /** Guarded fetcher used by the proxy for provider-owned auxiliary requests such as token exchange. */
+  fetcher: typeof fetch;
 }
 
 export interface ProviderProxyDefinition {
@@ -394,6 +399,7 @@ export function defineProviderProxy(input: ProviderProxyDefinition): ProviderPro
         url,
         headers,
         credential,
+        fetcher: egressFetch,
       });
 
       const init: RequestInit = {
@@ -785,7 +791,7 @@ export function defineProviderExecutors<TContext>(input: ProviderExecutorDefinit
           ),
         };
       } catch (error) {
-        return toProviderExecutionError(error, fallbackMessage);
+        return input.mapError?.(error) ?? toProviderExecutionError(error, fallbackMessage);
       }
     };
   }
@@ -847,6 +853,7 @@ export function defineOAuthProviderExecutors(
       const providerContext: OAuthProviderContext = {
         accessToken: credential.accessToken,
         tokenType: credential.tokenType,
+        providerSecret: credential.providerSecret,
         fetcher,
         signal: context.signal,
       };

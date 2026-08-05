@@ -757,7 +757,8 @@ export const githubActions: ActionDefinition[] = [
   }),
   action({
     name: "list_repository_issues",
-    description: "List issues for a GitHub repository. Pull requests are filtered out from the response.",
+    description:
+      "List issues for a GitHub repository. Pull requests are filtered out of the response; pageInfo.fetched reports the raw page length before filtering, so paginating callers must continue while fetched equals perPage (30 by default) even when the issues array comes back short or empty.",
     requiredScopes: githubRepoScopes,
     inputSchema: s.object({
       owner: nonEmptyString,
@@ -767,10 +768,26 @@ export const githubActions: ActionDefinition[] = [
       sort: s.stringEnum(["created", "updated", "comments"]),
       direction: s.stringEnum(["asc", "desc"]),
       since: s.string(),
-      ...optionalPaginationFields,
+      perPage: s.integer({
+        minimum: 1,
+        maximum: 100,
+        default: 30,
+        description: "Number of results requested per page. Defaults to 30.",
+      }),
+      page: optionalPaginationFields.page,
     }),
     outputSchema: s.object({
       issues: s.array(githubIssueSchema),
+      pageInfo: s.requiredObject(
+        "Pagination signals from the raw GitHub page, before pull requests are filtered out.",
+        {
+          fetched: s.integer({
+            minimum: 0,
+            description:
+              "Number of items GitHub returned on this page before filtering. Continue paginating while this equals perPage, which defaults to 30.",
+          }),
+        },
+      ),
     }),
   }),
   action({

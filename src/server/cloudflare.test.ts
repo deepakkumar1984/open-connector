@@ -25,6 +25,49 @@ describe("cloudflare worker", () => {
     vi.restoreAllMocks();
   });
 
+  it("deduplicates concurrent app creation and retries after a transient catalog failure", async () => {
+    // The app and catalog caches live in module state, so this test needs an isolate of its own:
+    // the shared `worker` above has already cached a healthy catalog. The reimported copy also
+    // gets a fresh `guarded-fetch` module, which `vitest.setup.ts` no longer holds off real DNS —
+    // keep this instance on local routes that perform no provider egress.
+    vi.resetModules();
+    const { default: isolatedWorker } = await import("./cloudflare.ts");
+    const fallback = memoryAssets(chunkedCatalog());
+    let indexAttempts = 0;
+    const assets: AssetsBinding = {
+      async fetch(request) {
+        if (new URL(request.url).pathname === "/catalog/index.json" && ++indexAttempts === 1) {
+          return new Response("upstream", { status: 500 });
+        }
+        return fallback.fetch(request);
+      },
+    };
+    const env: CloudflareEnv = {
+      DB: new UnusedD1Database(),
+      TRANSIT_FILES: new UnusedR2Bucket(),
+      ASSETS: assets,
+    };
+    const request = (): Request => new Request("https://catalog-retry.example.com/api/auth/session");
+    const failures = await Promise.allSettled([
+      isolatedWorker.fetch(request(), env, createExecutionContext()),
+      isolatedWorker.fetch(request(), env, createExecutionContext()),
+    ]);
+
+    for (const failure of failures) {
+      expect(failure).toMatchObject({
+        status: "rejected",
+        reason: {
+          message: "Cloudflare asset catalog request failed: /catalog/index.json returned 500",
+        },
+      });
+    }
+    expect(indexAttempts).toBe(1);
+
+    const response = await isolatedWorker.fetch(request(), env, createExecutionContext());
+    expect(response.status).toBe(200);
+    expect(indexAttempts).toBe(2);
+  });
+
   it("writes connection logs to console", async () => {
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
     const response = await worker.fetch(
@@ -88,7 +131,7 @@ describe("cloudflare worker", () => {
       DB: new UnusedD1Database(),
       TRANSIT_FILES: namespace,
       TRANSIT_FILES_BACKEND: "kv",
-      ASSETS: memoryAssets({ "/catalog/apps.json": [provider] }),
+      ASSETS: memoryAssets(chunkedCatalog()),
     };
 
     const form = new FormData();
@@ -123,7 +166,7 @@ describe("cloudflare worker", () => {
       DB: new UnusedD1Database(),
       TRANSIT_FILES: bucket,
       // TRANSIT_FILES_BACKEND intentionally omitted -> must fall back to R2.
-      ASSETS: memoryAssets({ "/catalog/apps.json": [provider] }),
+      ASSETS: memoryAssets(chunkedCatalog()),
     };
 
     const form = new FormData();
@@ -179,9 +222,7 @@ function createEnv(): CloudflareEnv {
   return {
     DB: new UnusedD1Database(),
     TRANSIT_FILES: new UnusedR2Bucket(),
-    ASSETS: memoryAssets({
-      "/catalog/apps.json": [provider],
-    }),
+    ASSETS: memoryAssets(chunkedCatalog()),
   };
 }
 
@@ -189,6 +230,14 @@ function createExecutionContext(): Parameters<typeof worker.fetch>[2] {
   return {
     waitUntil() {},
     passThroughOnException() {},
+  };
+}
+
+/** The asset layout `scripts/copy-catalog-assets.ts` emits, so the worker tests boot the shipped path. */
+function chunkedCatalog(): Record<string, unknown> {
+  return {
+    "/catalog/index.json": { version: 1, providerCount: 1, chunks: ["apps-0000.json"] },
+    "/catalog/apps-0000.json": [provider],
   };
 }
 

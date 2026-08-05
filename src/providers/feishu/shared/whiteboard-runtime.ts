@@ -1,6 +1,6 @@
 import type { FeishuJsonRequest } from "./client.ts";
 
-import { optionalString } from "../../../core/cast.ts";
+import { optionalString, optionalStringArray } from "../../../core/cast.ts";
 import { ProviderRequestError } from "../../provider-runtime.ts";
 
 interface FeishuWhiteboardActionHandler {
@@ -123,10 +123,6 @@ function requireResponseString(value: unknown, fieldName: string) {
     throw invalidResponse(`Feishu whiteboard response is missing ${fieldName}`);
   }
   return string;
-}
-
-function optionalStringArray(value: unknown) {
-  return Array.isArray(value) && value.every((item) => typeof item === "string") ? value : undefined;
 }
 
 function invalidResponse(message: string) {

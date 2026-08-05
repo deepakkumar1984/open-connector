@@ -539,7 +539,7 @@ function normalizeElasticsearchBaseUrl(value: unknown, allowPrivateNetwork: bool
     throw new ProviderRequestError(400, "baseUrl must be a valid absolute URL");
   }
 
-  if (parsed.protocol !== "https:") {
+  if (parsed.protocol !== "https:" && !allowPrivateNetwork) {
     throw new ProviderRequestError(400, "baseUrl must use HTTPS");
   }
   if (parsed.username || parsed.password) {

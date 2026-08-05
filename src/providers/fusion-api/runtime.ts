@@ -50,7 +50,7 @@ export async function validateFusionApiCredential(
     },
     grantedScopes: [],
     metadata: {
-      apiBaseUrl: readFusionApiBaseUrl(),
+      apiBaseUrl: fusionApiDefaultBaseUrl,
       validationEndpoint: fusionApiValidationPath,
     },
   };
@@ -87,7 +87,7 @@ interface FusionApiRequest {
 }
 
 async function fusionApiRequest(context: FusionApiRequestContext, request: FusionApiRequest): Promise<unknown> {
-  const url = new URL(request.path, `${readFusionApiBaseUrl()}/`);
+  const url = new URL(request.path, `${fusionApiDefaultBaseUrl}/`);
   if (request.query) {
     for (const [key, value] of request.query) {
       url.searchParams.append(key, value);
@@ -238,18 +238,4 @@ async function readFusionApiError(response: Response): Promise<string> {
   }
 
   return text.trim() || `fusion-api request failed with ${response.status}`;
-}
-
-function readFusionApiBaseUrl(): string {
-  const configuredBaseUrl = process.env.FUSION_API_BASE_URL?.trim() || fusionApiDefaultBaseUrl;
-  let url: URL;
-  try {
-    url = new URL(configuredBaseUrl);
-  } catch {
-    throw new ProviderRequestError(500, "FUSION_API_BASE_URL must be a valid URL");
-  }
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new ProviderRequestError(500, "FUSION_API_BASE_URL must use http or https");
-  }
-  return url.toString().replace(/\/+$/u, "");
 }
