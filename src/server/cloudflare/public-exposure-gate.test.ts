@@ -1,5 +1,6 @@
-import { describe, expect, it } from "vitest";
 import type { CloudflareEnv } from "./cloudflare-env.ts";
+
+import { describe, expect, it } from "vitest";
 import {
   createConcealmentResponse,
   hasValidServiceToken,

@@ -6,41 +6,41 @@
   "compatibility_date": "2026-07-02",
   "compatibility_flags": ["nodejs_compat"],
   "cache": {
-    "enabled": true
+    "enabled": true,
   },
   "assets": {
     "directory": "dist/web",
     "binding": "ASSETS",
     "not_found_handling": "single-page-application",
-    "run_worker_first": true
+    "run_worker_first": true,
   },
   "observability": {
     "enabled": true,
     "logs": {
       "enabled": true,
       "invocation_logs": true,
-      "persist": true
-    }
+      "persist": true,
+    },
   },
   "vars": {
     "OOMOL_CONNECT_ORIGIN": "https://blazorly-connectors-preview.battini.workers.dev",
     "OOMOL_CONNECT_PUBLIC_EXPOSURE": "hidden",
     // A deliberately non-matching allowlist keeps every action and proxy
     // denied until a reviewed Stage 1 sandbox cohort replaces it explicitly.
-    "OOMOL_CONNECT_ALLOWED_ACTIONS": "__stage0_disabled__"
+    "OOMOL_CONNECT_ALLOWED_ACTIONS": "__stage0_disabled__",
   },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "open-connector-preview",
       "database_id": "20fbdb43-937d-4a5f-a66b-bbe08305326f",
-      "migrations_dir": "migrations"
-    }
+      "migrations_dir": "migrations",
+    },
   ],
   "r2_buckets": [
     {
       "binding": "TRANSIT_FILES",
-      "bucket_name": "open-connector-transit-files-preview"
-    }
-  ]
+      "bucket_name": "open-connector-transit-files-preview",
+    },
+  ],
 }
