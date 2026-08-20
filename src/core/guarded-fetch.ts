@@ -1,4 +1,4 @@
-import { assertPublicHttpUrl, isBlockedIpAddress, isIpAddress, isIpv4Address } from "./request.ts";
+import { assertPublicHttpUrl, classifyIpAddress, isEgressTrustedHost, isIpAddress, isIpv4Address } from "./request.ts";
 
 /**
  * Single resolved address returned by a DNS lookup, mirroring the shape of
@@ -44,6 +44,8 @@ export interface GuardedFetchOptions {
    * only adds a per-request lookup. On by default.
    */
   skipDnsValidation?: boolean;
+  /** Additional credential-bearing headers to drop when a redirect crosses origins. */
+  additionalSensitiveHeaders?: readonly string[];
   /** Transform errors thrown by the underlying transport before they escape the guarded fetch. */
   mapTransportError?: (error: unknown) => unknown;
 }
@@ -97,6 +99,17 @@ const crossOriginCredentialHeaders = new Set([
   "x-goog-api-key",
   "x-acs-security-token",
   "x-amz-security-token",
+  "x-n8n-api-key",
+  "x-shopify-access-token",
+  "x-vtex-api-appkey",
+  "x-vtex-api-apptoken",
+  "x-tomba-key",
+  "client-token",
+  "x-session-key",
+  "x-redmine-api-key",
+  "authkey",
+  "x-oksign-authorization",
+  "x-filesapi-key",
 ]);
 /** Body-describing headers dropped when a redirect rewrites the method to GET, mirroring the fetch spec. */
 const bodyHeaders = ["content-encoding", "content-language", "content-length", "content-location", "content-type"];
@@ -145,11 +158,12 @@ export function unwrapGuardedFetch(fetcher: typeof fetch | undefined): typeof fe
  *   dropped on cross-origin hops.
  * - When a DNS lookup is available, hostnames are resolved before each hop and
  *   requests to names resolving to blocked addresses are rejected, closing the
- *   static DNS name→private-IP bypass. Lookup failures fall through to the
- *   transport so unreachable hosts still surface their natural network error.
- *   (True time-of-check/time-of-use DNS rebinding with low-TTL records remains
- *   possible because the transport re-resolves; full connection pinning is not
- *   expressible over the fetch API.) The default lookup uses `node:dns`, which
+ *   static DNS name→private-IP bypass. Lookup failures fail closed (the request
+ *   is rejected) so a forced-failure or split resolver cannot skip address
+ *   validation. (True time-of-check/time-of-use DNS rebinding with low-TTL
+ *   records remains possible because the transport re-resolves; full connection
+ *   pinning is not expressible over the fetch API.) The default lookup uses
+ *   `node:dns`, which
  *   Cloudflare Workers also provides under `nodejs_compat` (resolving over DoH),
  *   so this layer applies there too. Only on a runtime without `node:dns` does it
  *   degrade to a no-op, leaving the URL-literal and redirect-`Location` checks.
@@ -162,6 +176,7 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
   const baseFetch = unwrapGuardedFetch(options.fetch);
   const createError = options.createError ?? ((message: string) => new TypeError(message));
   const maxRedirects = options.maxRedirects ?? defaultMaxRedirects;
+  const additionalSensitiveHeaders = new Set(options.additionalSensitiveHeaders?.map((name) => name.toLowerCase()));
   const guardedFetch = (async (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
     const transport = baseFetch ?? globalThis.fetch;
     const fetchTransport = async (
@@ -249,7 +264,7 @@ export function createGuardedFetch(options: GuardedFetchOptions = {}): typeof fe
       }
       if (guardedNext.origin !== url.origin) {
         for (const name of [...headers.keys()]) {
-          if (crossOriginCredentialHeaders.has(name)) {
+          if (crossOriginCredentialHeaders.has(name) || additionalSensitiveHeaders.has(name)) {
             headers.delete(name);
           }
         }
@@ -362,9 +377,35 @@ async function assertResolvedAddressesAllowed(
   if (results.length === 0) {
     throw policy.createResolutionError(`${fieldName} could not be resolved for validation`);
   }
+  // Deployment-level trusted-host setting, resolved per request so a bootstrap that
+  // configures it after module load is honored. It may open private and
+  // VPN-mapped results, while unsafe special-use targets remain blocked.
+  const trustedHost = isEgressTrustedHost(hostname);
   for (const entry of results) {
-    if (entry && typeof entry.address === "string" && isBlockedIpAddress(entry.address, policy.allowPrivateNetwork)) {
-      throw policy.createError(`${fieldName} must not resolve to private or reserved IP addresses`);
+    if (entry && typeof entry.address === "string") {
+      const addressClass = classifyIpAddress(entry.address);
+      if (addressClass === "always-blocked") {
+        throw policy.createError(`${fieldName} must not resolve to private or reserved IP addresses`);
+      }
+      if (addressClass === "public" || (addressClass === "private" && policy.allowPrivateNetwork)) {
+        continue;
+      }
+      if (trustedHost) {
+        continue;
+      }
+      // Name the way out. This rejection happens before any packet leaves the
+      // process, so on its own it is indistinguishable from a network failure:
+      // the caller sees a sub-100ms error with nothing pointing at DNS, at this
+      // guard, or at the fact that an operator-level opt-out exists. The
+      // resolved address is deliberately NOT included — for hosts that come from
+      // tenant input (mail credentials, self-hosted base URLs) echoing it back
+      // would turn the guard into a DNS/internal-range probe oracle, a property
+      // src/mail/imap-smtp/host-pinning.test.ts asserts.
+      throw policy.createError(
+        `${fieldName} must not resolve to private or reserved IP addresses ` +
+          `(if this host is reached through a corporate VPN or split DNS, add it to ` +
+          `OOMOL_CONNECT_EGRESS_TRUSTED_HOSTS)`,
+      );
     }
   }
   return results;
@@ -381,7 +422,7 @@ async function resolveDefaultLookup(): Promise<GuardedFetchDnsLookup | null | un
         // Keep only real addresses. workerd's node:dns resolves over DoH and maps
         // every answer record into an entry without filtering by record type, so a
         // CNAME answer arrives as { address: "target.example.com.", family: 4 }.
-        // isBlockedIpAddress treats unparseable input as blocked, which would
+        // classifyIpAddress treats unparseable input as blocked, which would
         // reject every CNAME'd host (api.tailscale.com, graph.microsoft.com, ...).
         // The real A/AAAA records are present alongside, so dropping non-addresses
         // keeps the resolved-address check intact rather than disabling it.

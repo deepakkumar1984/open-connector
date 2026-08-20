@@ -24,7 +24,8 @@ const looseObjectSchema = s.looseObject("An arbitrary JSON object returned by Mo
 const boardStateSchema = s.stringEnum("The board state filter.", ["active", "all", "archived", "deleted"]);
 const boardKindSchema = s.stringEnum("The board visibility type.", ["private", "public", "share"]);
 const workspaceStateSchema = s.stringEnum("The workspace state filter.", ["active", "all", "archived", "deleted"]);
-const workspaceKindSchema = s.stringEnum("The workspace visibility type.", ["open", "closed"]);
+const workspaceKindSchema = s.stringEnum("The workspace visibility type.", ["open", "closed", "template"]);
+const creatableWorkspaceKindSchema = s.stringEnum("The visibility type of the new workspace.", ["open", "closed"]);
 const positionRelativeSchema = s.stringEnum("Where to place the item relative to another item.", [
   "before_at",
   "after_at",
@@ -62,6 +63,45 @@ const assetSchema = s.looseObject("A Monday asset summary.");
 const dashboardSchema = s.looseObject("A Monday dashboard summary.");
 const formSchema = s.looseObject("A Monday form response.");
 const departmentSchema = s.looseObject("A Monday department.");
+const createColumnTypeSchema = s.stringEnum(
+  "The official Monday column type to create. Use people for a People column and numbers for a Numbers column.",
+  [
+    "auto_number",
+    "board_relation",
+    "button",
+    "checkbox",
+    "color_picker",
+    "country",
+    "creation_log",
+    "date",
+    "dependency",
+    "doc",
+    "dropdown",
+    "email",
+    "file",
+    "formula",
+    "hour",
+    "last_updated",
+    "link",
+    "location",
+    "long_text",
+    "mirror",
+    "numbers",
+    "people",
+    "phone",
+    "progress",
+    "rating",
+    "status",
+    "subtasks",
+    "tags",
+    "text",
+    "timeline",
+    "time_tracking",
+    "vote",
+    "week",
+    "world_clock",
+  ],
+);
 
 function updateDateFilterSchema(description: string): JsonSchema {
   return s.anyOf(description, [
@@ -106,6 +146,57 @@ const actions: MondayActionSource[] = [
     }),
     outputSchema: output("The output payload for listing Monday workspaces.", {
       workspaces: s.array("The Monday workspaces returned by the query.", looseObjectSchema),
+    }),
+  },
+  {
+    name: "create_workspace",
+    description: "Create a Monday workspace with the official create_workspace mutation.",
+    providerPermissions: ["workspaces:write"],
+    inputSchema: input(
+      "The input payload for creating a Monday workspace.",
+      {
+        name: s.nonEmptyString("The name of the new workspace."),
+        kind: creatableWorkspaceKindSchema,
+        description: s.string("The description of the new workspace."),
+        account_product_id: idSchema,
+      },
+      ["name", "kind"],
+    ),
+    outputSchema: output("The output payload for creating a Monday workspace.", {
+      workspace: s.describe(looseObjectSchema, "The Monday workspace returned by create_workspace."),
+    }),
+  },
+  {
+    name: "update_workspace",
+    description: "Update a Monday workspace with the official update_workspace mutation.",
+    providerPermissions: ["workspaces:write"],
+    inputSchema: {
+      ...input(
+        "The input payload for updating a Monday workspace.",
+        {
+          workspace_id: idSchema,
+          name: s.nonEmptyString("The updated workspace name."),
+          description: s.string("The updated workspace description."),
+          kind: workspaceKindSchema,
+          account_product_id: idSchema,
+        },
+        ["workspace_id"],
+      ),
+      anyOf: ["name", "description", "kind", "account_product_id"].map((key) => ({ required: [key] })),
+    },
+    outputSchema: output("The output payload for updating a Monday workspace.", {
+      workspace: s.describe(looseObjectSchema, "The Monday workspace returned by update_workspace."),
+    }),
+  },
+  {
+    name: "delete_workspace",
+    description: "Delete a Monday workspace with the official delete_workspace mutation.",
+    providerPermissions: ["workspaces:write"],
+    inputSchema: input("The input payload for deleting a Monday workspace.", { workspace_id: idSchema }, [
+      "workspace_id",
+    ]),
+    outputSchema: output("The output payload for deleting a Monday workspace.", {
+      deletedWorkspaceId: s.string("The deleted Monday workspace identifier."),
     }),
   },
   {
@@ -301,7 +392,7 @@ const actions: MondayActionSource[] = [
       {
         board_id: idSchema,
         title: s.nonEmptyString("The column title."),
-        column_type: s.nonEmptyString("The Monday column type."),
+        column_type: createColumnTypeSchema,
         id: s.nonEmptyString("Optional custom column identifier."),
         description: s.string("Column description."),
       },

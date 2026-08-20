@@ -32,6 +32,7 @@ describe("D1RuntimeDatabase", () => {
       service: "gmail",
       clientId: "client-id",
       clientSecret: "client-secret",
+      requestedScopes: ["gmail.readonly"],
       extra: { tenant: "default" },
       secretExtra: {},
     });
@@ -49,6 +50,7 @@ describe("D1RuntimeDatabase", () => {
     await expect(database.oauthClientConfigStore.get("gmail")).resolves.toMatchObject({
       clientId: "client-id",
       clientSecret: "client-secret",
+      requestedScopes: ["gmail.readonly"],
       extra: { tenant: "default" },
     });
     await expect(database.connectionStore.list()).resolves.toMatchObject([
@@ -133,6 +135,30 @@ describe("D1RuntimeDatabase", () => {
     await expect(database.oauthStateStore.take("state-1")).resolves.toBeUndefined();
   });
 
+  it("stores OAuth state through the secret codec", async () => {
+    const d1 = new SqliteD1Database();
+    const database = new D1RuntimeDatabase(d1, {
+      secretCodec: new AesGcmSecretCodec("local-test-key"),
+    });
+    await database.oauthStateStore.set({
+      service: "github",
+      state: "state-1",
+      createdAt: "2026-06-30T00:00:00.000Z",
+      clientConfig: {
+        service: "github",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        extra: {},
+        secretExtra: {},
+      },
+    });
+
+    expect(d1.value("oauth_states", "state", "state-1")).not.toContain("client-secret");
+    await expect(database.oauthStateStore.take("state-1")).resolves.toMatchObject({
+      clientConfig: { clientSecret: "client-secret" },
+    });
+  });
+
   it("stores runtime token hashes and supports verification and revocation", async () => {
     const database = new D1RuntimeDatabase(new SqliteD1Database());
     const tokens = new RuntimeTokenService(database.runtimeTokenStore);
@@ -141,9 +167,11 @@ describe("D1RuntimeDatabase", () => {
       allowedActions: ["github.*"],
       blockedActions: ["github.delete_repository"],
       allowedProxies: ["github"],
+      allowedConnections: ["example:work"],
     });
     expect(created.token).toMatch(/^oct_/);
     expect(created.record.tokenHash).not.toBe(created.token);
+    expect(created.record.allowedConnections).toEqual(["example:work"]);
 
     await expect(tokens.verifyToken(created.token)).resolves.toBe(true);
     const [listed] = await tokens.listTokens();
@@ -153,25 +181,61 @@ describe("D1RuntimeDatabase", () => {
       allowedActions: ["github.*"],
       blockedActions: ["github.delete_repository"],
       allowedProxies: ["github"],
+      allowedConnections: ["example:work"],
     });
     expect(listed?.lastUsedAt).toBeTruthy();
+    await expect(tokens.resolveToken(created.token)).resolves.toMatchObject({
+      tokenId: created.record.id,
+      allowedConnections: ["example:work"],
+    });
 
     await expect(
       tokens.updateTokenPolicy(created.record.id, {
         allowedActions: ["github.get_current_user"],
         blockedActions: [],
         allowedProxies: ["slack"],
+        allowedConnections: ["example:personal"],
       }),
     ).resolves.toMatchObject({
       allowedActions: ["github.get_current_user"],
       blockedActions: [],
       allowedProxies: ["slack"],
+      allowedConnections: ["example:personal"],
+    });
+    await expect(tokens.resolveToken(created.token)).resolves.toMatchObject({
+      allowedConnections: ["example:personal"],
     });
 
     await expect(tokens.revokeToken(created.record.id)).resolves.toBe(true);
     await expect(tokens.listTokens()).resolves.toEqual([]);
     await expect(tokens.verifyToken(created.token)).resolves.toBe(false);
     await expect(tokens.revokeToken(created.record.id)).resolves.toBe(false);
+  });
+
+  it("defaults omitted allowedConnections to an unrestricted empty list", async () => {
+    const database = new D1RuntimeDatabase(new SqliteD1Database());
+    const tokens = new RuntimeTokenService(database.runtimeTokenStore);
+    const created = await tokens.createToken("Open token");
+    expect(created.record.allowedConnections).toEqual([]);
+    await expect(tokens.listTokens()).resolves.toMatchObject([{ allowedConnections: [] }]);
+    await expect(tokens.resolveToken(created.token)).resolves.toMatchObject({ allowedConnections: [] });
+  });
+
+  it("defaults missing allowedConnections to an unrestricted empty list", async () => {
+    const d1 = new SqliteD1Database();
+    d1.exec(
+      `insert into runtime_tokens (id, name, token_hash, created_at) values ('legacy-token', 'Legacy', 'legacy-hash', '2026-06-30T00:00:00.000Z')`,
+    );
+    const database = new D1RuntimeDatabase(d1);
+    await expect(database.runtimeTokenStore.list()).resolves.toMatchObject([
+      {
+        id: "legacy-token",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [],
+      },
+    ]);
   });
 
   it("persists the singleton runtime policy", async () => {
@@ -472,6 +536,9 @@ class SqliteD1Database implements D1DatabaseBinding {
     this.database.exec(
       readFileSync(new URL("../../../migrations/0010_connection_revision.sql", import.meta.url), "utf8"),
     );
+    this.database.exec(
+      readFileSync(new URL("../../../migrations/0011_runtime_token_connection_scope.sql", import.meta.url), "utf8"),
+    );
   }
 
   prepare(query: string): D1PreparedStatementBinding {
@@ -483,8 +550,8 @@ class SqliteD1Database implements D1DatabaseBinding {
   }
 
   value(
-    table: "connections" | "oauth_client_configs" | "idempotency_records",
-    keyColumn: "service" | "key_hash",
+    table: "connections" | "oauth_client_configs" | "oauth_states" | "idempotency_records",
+    keyColumn: "service" | "state" | "key_hash",
     key: string,
     valueColumn: "value" | "response_value" = "value",
   ): string {

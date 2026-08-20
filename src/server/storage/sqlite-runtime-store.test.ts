@@ -49,6 +49,7 @@ describe("SqliteRuntimeDatabase", () => {
       "0008_runtime_token_policy.sql",
       "0009_runtime_token_proxy.sql",
       "0010_connection_revision.sql",
+      "0011_runtime_token_connection_scope.sql",
     ];
     expect(entries.filter((entry) => entry.message === "sqlite migration started")).toEqual(
       migrations.map((migration) => ({ fields: { migration }, message: "sqlite migration started" })),
@@ -100,6 +101,7 @@ describe("SqliteRuntimeDatabase", () => {
       service: "gmail",
       clientId: "client-id",
       clientSecret: "client-secret",
+      requestedScopes: ["gmail.readonly"],
       extra: { tenant: "default" },
       secretExtra: {},
     });
@@ -132,6 +134,7 @@ describe("SqliteRuntimeDatabase", () => {
     await expect(second.oauthClientConfigStore.get("gmail")).resolves.toMatchObject({
       clientId: "client-id",
       clientSecret: "client-secret",
+      requestedScopes: ["gmail.readonly"],
       extra: { tenant: "default" },
     });
     await expect(second.oauthStateStore.take("state-1")).resolves.toMatchObject({
@@ -448,6 +451,7 @@ describe("SqliteRuntimeDatabase", () => {
       "0008_runtime_token_policy.sql",
       "0009_runtime_token_proxy.sql",
       "0010_connection_revision.sql",
+      "0011_runtime_token_connection_scope.sql",
     ]) {
       raw.exec(readFileSync(new URL(`../../../migrations/${migration}`, import.meta.url), "utf8"));
     }
@@ -518,7 +522,13 @@ describe("SqliteRuntimeDatabase", () => {
       connectionId: migratedConnection?.id,
     });
     await expect(migrated.runtimeTokenStore.list()).resolves.toMatchObject([
-      { id: "legacy-token", allowedActions: [], blockedActions: [], allowedProxies: [] },
+      {
+        id: "legacy-token",
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [],
+      },
     ]);
     await expect(migrated.runtimePolicyStore.get()).resolves.toBeUndefined();
     await expect(
@@ -554,6 +564,11 @@ describe("SqliteRuntimeDatabase", () => {
     ).toBeDefined();
     expect(
       inspected.prepare("select name from runtime_migrations where name = ?").get("0010_connection_revision.sql"),
+    ).toBeDefined();
+    expect(
+      inspected
+        .prepare("select name from runtime_migrations where name = ?")
+        .get("0011_runtime_token_connection_scope.sql"),
     ).toBeDefined();
     expect(inspected.prepare("pragma table_info(connections)").all()).toContainEqual(
       expect.objectContaining({ name: "id", notnull: 1 }),
@@ -618,6 +633,52 @@ describe("SqliteRuntimeDatabase", () => {
     second.close();
   });
 
+  it("encrypts pending OAuth state while keeping legacy plaintext state readable", async () => {
+    const databasePath = await createDatabasePath();
+    const encrypted = new SqliteRuntimeDatabase(databasePath, {
+      secretCodec: new AesGcmSecretCodec("local-test-key"),
+    });
+    await encrypted.oauthStateStore.set({
+      service: "github",
+      state: "state-encrypted",
+      createdAt: "2026-06-30T00:00:00.000Z",
+      clientConfig: {
+        service: "github",
+        clientId: "client-id",
+        clientSecret: "client-secret",
+        extra: {},
+        secretExtra: {},
+      },
+    });
+    const inspected = new DatabaseSync(databasePath);
+    const stored = inspected.prepare("select value from oauth_states where state = ?").get("state-encrypted") as {
+      value: string;
+    };
+    expect(stored.value).toMatch(/^enc:v1:/);
+    expect(stored.value).not.toContain("client-secret");
+    inspected.close();
+    await expect(encrypted.oauthStateStore.take("state-encrypted")).resolves.toMatchObject({
+      clientConfig: { clientSecret: "client-secret" },
+    });
+    encrypted.close();
+
+    const legacy = new SqliteRuntimeDatabase(databasePath, {
+      secretCodec: new AesGcmSecretCodec("local-test-key"),
+    });
+    const plainState = {
+      service: "github",
+      state: "state-legacy",
+      createdAt: "2026-06-30T00:00:00.000Z",
+    };
+    const raw = new DatabaseSync(databasePath);
+    raw
+      .prepare("insert into oauth_states (state, value, created_at) values (?, ?, ?)")
+      .run(plainState.state, JSON.stringify(plainState), plainState.createdAt);
+    raw.close();
+    await expect(legacy.oauthStateStore.take("state-legacy")).resolves.toEqual(plainState);
+    legacy.close();
+  });
+
   it("stores runtime token hashes and supports verification and revocation", async () => {
     const databasePath = await createDatabasePath();
     const database = new SqliteRuntimeDatabase(databasePath);
@@ -627,10 +688,12 @@ describe("SqliteRuntimeDatabase", () => {
       allowedActions: ["github.*"],
       blockedActions: ["github.delete_repository"],
       allowedProxies: ["github"],
+      allowedConnections: ["example:work"],
     });
     expect(created.token).toMatch(/^oct_/);
     expect(created.record.name).toBe("Claude Desktop");
     expect(created.record.tokenHash).not.toBe(created.token);
+    expect(created.record.allowedConnections).toEqual(["example:work"]);
     await expectDatabaseDirectoryNotToContain(databasePath, created.token);
 
     await expect(tokens.verifyToken(created.token)).resolves.toBe(true);
@@ -641,26 +704,47 @@ describe("SqliteRuntimeDatabase", () => {
       allowedActions: ["github.*"],
       blockedActions: ["github.delete_repository"],
       allowedProxies: ["github"],
+      allowedConnections: ["example:work"],
     });
     expect(listed?.lastUsedAt).toBeTruthy();
     expect(JSON.stringify(listed)).not.toContain(created.token);
+    await expect(tokens.resolveToken(created.token)).resolves.toMatchObject({
+      tokenId: created.record.id,
+      allowedConnections: ["example:work"],
+    });
 
     await expect(
       tokens.updateTokenPolicy(created.record.id, {
         allowedActions: ["github.get_current_user"],
         blockedActions: [],
         allowedProxies: ["slack"],
+        allowedConnections: ["example:personal"],
       }),
     ).resolves.toMatchObject({
       allowedActions: ["github.get_current_user"],
       blockedActions: [],
       allowedProxies: ["slack"],
+      allowedConnections: ["example:personal"],
+    });
+    await expect(tokens.resolveToken(created.token)).resolves.toMatchObject({
+      allowedConnections: ["example:personal"],
     });
 
     await expect(tokens.revokeToken(created.record.id)).resolves.toBe(true);
     await expect(tokens.listTokens()).resolves.toEqual([]);
     await expect(tokens.verifyToken(created.token)).resolves.toBe(false);
     await expect(tokens.revokeToken(created.record.id)).resolves.toBe(false);
+    database.close();
+  });
+
+  it("defaults omitted allowedConnections to an unrestricted empty list", async () => {
+    const databasePath = await createDatabasePath();
+    const database = new SqliteRuntimeDatabase(databasePath);
+    const tokens = new RuntimeTokenService(database.runtimeTokenStore);
+    const created = await tokens.createToken("Open token");
+    expect(created.record.allowedConnections).toEqual([]);
+    await expect(tokens.listTokens()).resolves.toMatchObject([{ allowedConnections: [] }]);
+    await expect(tokens.resolveToken(created.token)).resolves.toMatchObject({ allowedConnections: [] });
     database.close();
   });
 
@@ -752,6 +836,18 @@ describe("SqliteRuntimeDatabase", () => {
       extra: {},
       secretExtra: {},
     });
+    await database.oauthStateStore.set({
+      service: "gmail",
+      state: "state-rotation",
+      createdAt: "2026-06-30T00:00:00.000Z",
+      clientConfig: {
+        service: "gmail",
+        clientId: "state-client-id",
+        clientSecret: "state-client-secret",
+        extra: {},
+        secretExtra: {},
+      },
+    });
     const claim = {
       keyHash: "key-hash",
       requestHash: "request-hash",
@@ -789,6 +885,9 @@ describe("SqliteRuntimeDatabase", () => {
     });
     await expect(withNewKey.oauthClientConfigStore.get("gmail")).resolves.toMatchObject({
       clientSecret: "client-secret",
+    });
+    await expect(withNewKey.oauthStateStore.take("state-rotation")).resolves.toMatchObject({
+      clientConfig: { clientSecret: "state-client-secret" },
     });
     await expect(withNewKey.runtimeTokenStore.list()).resolves.toMatchObject([{ id: token.record.id }]);
     await expect(withNewKey.runLogStore.list()).resolves.toMatchObject({ items: [{ id: "run-1" }] });

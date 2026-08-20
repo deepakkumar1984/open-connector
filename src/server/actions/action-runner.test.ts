@@ -30,6 +30,18 @@ const exampleProvider: ProviderDefinition = {
   auth: [{ type: "no_auth" }],
   actions: [echoAction],
 };
+const authenticatedProvider: ProviderDefinition = {
+  ...exampleProvider,
+  authTypes: ["no_auth", "api_key"],
+  auth: [{ type: "no_auth" }, { type: "api_key" }],
+};
+const credential: Extract<ResolvedCredential, { authType: "api_key" }> = {
+  authType: "api_key",
+  apiKey: "example-key",
+  values: { apiKey: "example-key" },
+  profile: { accountId: "example", displayName: "Example", grantedScopes: [] },
+  metadata: {},
+};
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -148,6 +160,103 @@ describe("ActionRunner", () => {
       },
     });
   });
+
+  it("does not apply connection grants to no-auth actions", async () => {
+    const runs = new MemoryRunLogStore();
+    const providerLoader = new TestProviderLoader(async () => ({ ok: true, output: {} }));
+    const loadExecutor = vi.spyOn(providerLoader, "loadActionExecutor");
+    const resolveConnection = vi.spyOn(ConnectionService.prototype, "resolveForExecution");
+    const actionPolicy = new ActionPolicyService();
+    const policy = actionPolicy.createSnapshot(undefined, {
+      allowedActions: [],
+      blockedActions: [],
+      allowedProxies: [],
+      allowedConnections: ["ungranted-connection-id"],
+    });
+    const runner = createRunner({ runs, logger: createTestLogger().logger, providerLoader, actionPolicy });
+
+    const omitted = await runner.run({
+      actionId: "example.echo",
+      input: {},
+      caller: "http",
+      policy,
+      runtimeTokenId: "token-1",
+    });
+    const hidden = await runner.run({
+      actionId: "example.echo",
+      input: {},
+      caller: "http",
+      connectionName: "hidden",
+      policy,
+      runtimeTokenId: "token-1",
+    });
+
+    expect(omitted?.result).toMatchObject({ ok: true });
+    expect(hidden?.result).toMatchObject({ ok: true });
+    expect(resolveConnection).toHaveBeenCalledTimes(2);
+    expect(loadExecutor).toHaveBeenCalledTimes(2);
+    expect(runs.items[0]).toMatchObject({
+      runtimeTokenId: "token-1",
+      policy: { allowed: true },
+    });
+  });
+
+  it("uses stable IDs for credential connections on a provider that also supports no-auth", async () => {
+    const runs = new MemoryRunLogStore();
+    const resolveConnection = vi.spyOn(ConnectionService.prototype, "resolveForExecution");
+    const actionPolicy = new ActionPolicyService();
+    const store = new MemoryConnectionStore();
+    const connection = await store.set("example", "work", credential);
+    const runner = createRunner({
+      runs,
+      logger: createTestLogger().logger,
+      actionPolicy,
+      provider: authenticatedProvider,
+      store,
+    });
+
+    const allowed = await runner.run({
+      actionId: "example.echo",
+      input: {},
+      caller: "http",
+      connectionName: " work ",
+      policy: actionPolicy.createSnapshot(undefined, {
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [connection.id],
+      }),
+    });
+    const unrestricted = await runner.run({
+      actionId: "example.echo",
+      input: {},
+      caller: "mcp",
+      connectionName: "work",
+      policy: actionPolicy.createSnapshot(undefined, {
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: [],
+      }),
+    });
+    const denied = await runner.run({
+      actionId: "example.echo",
+      input: {},
+      caller: "http",
+      connectionName: "work",
+      policy: actionPolicy.createSnapshot(undefined, {
+        allowedActions: [],
+        blockedActions: [],
+        allowedProxies: [],
+        allowedConnections: ["another-connection-id"],
+      }),
+    });
+
+    expect(allowed?.result).toMatchObject({ ok: true });
+    expect(unrestricted?.result).toMatchObject({ ok: true });
+    expect(denied?.result).toMatchObject({ ok: false, error: { code: "connection_not_allowed" } });
+    expect(resolveConnection).toHaveBeenCalledTimes(2);
+  });
 });
 
 function createRunner(options: {
@@ -155,14 +264,20 @@ function createRunner(options: {
   logger: Logger;
   providerLoader?: IProviderLoader;
   actionPolicy?: ActionPolicyService;
+  provider?: ProviderDefinition;
+  store?: IConnectionStore;
 }): ActionRunner {
-  const catalog = createCatalogStore([exampleProvider], { executableActionIds: [echoAction.id] });
+  const catalog = createCatalogStore([options.provider ?? exampleProvider], { executableActionIds: [echoAction.id] });
   const providerLoader =
     options.providerLoader ?? new TestProviderLoader(async () => ({ ok: true, output: { message: "ok" } }));
   return new ActionRunner({
     catalog,
     providerLoader,
-    connections: new ConnectionService({ catalog, providerLoader, store: new MemoryConnectionStore() }),
+    connections: new ConnectionService({
+      catalog,
+      providerLoader,
+      store: options.store ?? new MemoryConnectionStore(),
+    }),
     runs: options.runs,
     actionPolicy: options.actionPolicy,
     logger: options.logger,
@@ -190,22 +305,35 @@ class TestProviderLoader implements IProviderLoader {
 }
 
 class MemoryConnectionStore implements IConnectionStore {
-  async get(): Promise<StoredConnection | undefined> {
-    return undefined;
+  private readonly connections = new Map<string, StoredConnection>();
+
+  async get(service: string, connectionName: string): Promise<StoredConnection | undefined> {
+    return this.connections.get(`${service}:${connectionName}`);
   }
 
   async set(service: string, connectionName: string, credential: ResolvedCredential): Promise<StoredConnection> {
-    return { id: crypto.randomUUID(), revision: crypto.randomUUID(), service, connectionName, credential };
+    const key = `${service}:${connectionName}`;
+    const connection = {
+      id: this.connections.get(key)?.id ?? crypto.randomUUID(),
+      revision: crypto.randomUUID(),
+      service,
+      connectionName,
+      credential,
+    };
+    this.connections.set(key, connection);
+    return connection;
   }
 
   async updateCredential(): Promise<boolean> {
     return false;
   }
 
-  async delete(): Promise<void> {}
+  async delete(service: string, connectionName: string): Promise<void> {
+    this.connections.delete(`${service}:${connectionName}`);
+  }
 
   async list(): Promise<StoredConnection[]> {
-    return [];
+    return [...this.connections.values()];
   }
 }
 

@@ -6,7 +6,7 @@ const service = "lingxing";
 
 export const provider: ProviderDefinition = {
   service,
-  displayName: "Lingxing",
+  displayName: "Lingxing MCP",
   description: "Discover and call live Lingxing ERP tools through the official Lingxing Streamable HTTP MCP service.",
   categories: ["Productivity", "Data", "Marketing"],
   authTypes: ["custom_credential"],
@@ -41,6 +41,6 @@ export const provider: ProviderDefinition = {
       },
     },
   ],
-  homepageUrl: "https://www.lingxing.com",
+  homepageUrl: "https://www.lingxing.com/help/article/mcp",
   actions: lingxingActions,
 };

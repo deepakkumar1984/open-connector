@@ -6,7 +6,12 @@ import type { Logger } from "./logger.ts";
 import type { ISecretCodec } from "./secrets/secret-codec-core.ts";
 
 import { ActionPolicyService, parseActionPolicyList } from "../core/action-policy.ts";
-import { parsePrivateNetworkAccessFlag, setPrivateNetworkAccessAllowed } from "../core/request.ts";
+import {
+  parseEgressTrustedHosts,
+  parsePrivateNetworkAccessFlag,
+  setEgressTrustedHosts,
+  setPrivateNetworkAccessAllowed,
+} from "../core/request.ts";
 import { ProviderLoader } from "../providers/provider-loader.ts";
 import { executorModules } from "../providers/registry.cloudflare.generated.ts";
 import { isConsoleShellPath } from "./api/console-paths.ts";
@@ -38,6 +43,7 @@ const appCache = new IsolatePromiseCache<ConnectApp>();
 export default {
   async fetch(request: Request, env: CloudflareEnv, _ctx: CloudflareExecutionContext): Promise<Response> {
     setPrivateNetworkAccessAllowed(parsePrivateNetworkAccessFlag(env.OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK));
+    setEgressTrustedHosts(parseEgressTrustedHosts(env.OOMOL_CONNECT_EGRESS_TRUSTED_HOSTS));
 
     if (shouldHidePublicSurface(env)) {
       const { pathname } = new URL(request.url);
@@ -45,7 +51,6 @@ export default {
         return createConcealmentResponse();
       }
     }
-
     const publicOrigin = resolvePublicOrigin(request, env);
     const { app } = await appCache.get(createCacheKey(env, publicOrigin), () => createCloudflareApp(env, publicOrigin));
     const response = await app.fetch(request, env);
@@ -96,6 +101,7 @@ async function createCloudflareApp(env: CloudflareEnv, publicOrigin: string): Pr
       allowedProxies: parseActionPolicyList(env.OOMOL_CONNECT_ALLOWED_PROXIES),
       blockedProxies: parseActionPolicyList(env.OOMOL_CONNECT_BLOCKED_PROXIES),
     }),
+    allowedCustomOAuth: parseActionPolicyList(env.OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH),
     logger: workerLogger,
     computeRuntimeAuthConfigured: false,
     // Cloudflare compresses on egress itself: Response defaults to
@@ -152,6 +158,7 @@ function createCacheKey(env: CloudflareEnv, publicOrigin: string): string {
     blockedActions: env.OOMOL_CONNECT_BLOCKED_ACTIONS ?? "",
     allowedProxies: env.OOMOL_CONNECT_ALLOWED_PROXIES ?? "",
     blockedProxies: env.OOMOL_CONNECT_BLOCKED_PROXIES ?? "",
+    allowedCustomOAuth: env.OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH ?? "",
     transitFileTtlSeconds: env.OOMOL_CONNECT_TRANSIT_FILE_TTL_SECONDS ?? "",
     transitFileMaxBytes: env.OOMOL_CONNECT_TRANSIT_FILE_MAX_BYTES ?? "",
     runLimit: env.OOMOL_CONNECT_RUN_LIMIT ?? "",

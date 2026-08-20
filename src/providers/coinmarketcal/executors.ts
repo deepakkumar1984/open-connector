@@ -1,4 +1,5 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 
 import { optionalBoolean, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
@@ -6,6 +7,7 @@ import { queryParams } from "../../core/request.ts";
 import {
   createProviderTimeout,
   defineApiKeyProviderExecutors,
+  defineProviderProxy,
   isAbortLikeError,
   ProviderRequestError,
   providerUserAgent,
@@ -24,7 +26,7 @@ const rankingToSortBy: Record<string, string> = {
   catalyst: "catalyst_events",
 };
 
-export const coinmarketcalActionHandlers: Record<string, CoinmarketcalActionHandler> = {
+export const coinmarketcalActionHandlers: ProviderActionHandlers<"coinmarketcal", CoinmarketcalActionHandler> = {
   async list_event_categories(_input, context) {
     const payload = await requestCoinmarketcalJson("/categories", {}, context, "execute");
     const normalized = normalizeCoinmarketcalListPayload(payload);
@@ -219,3 +221,9 @@ function readCoinmarketcalErrorMessage(payload: unknown): string | undefined {
   const record = optionalRecord(payload);
   return optionalString(record?.error) ?? optionalString(record?.message) ?? optionalString(record?.error_message);
 }
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: "https://developers.coinmarketcal.com/v1",
+  auth: { type: "api_key_header", name: "x-api-key" },
+});

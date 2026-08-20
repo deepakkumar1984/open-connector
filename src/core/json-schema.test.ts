@@ -56,6 +56,24 @@ describe("jsonSchema.nonWhitespaceString", () => {
   });
 });
 
+describe("jsonSchema.array", () => {
+  it("preserves array uniqueness constraints", () => {
+    expect(
+      jsonSchema.stringArray("Unique identifiers.", {
+        maxItems: 100,
+        uniqueItems: true,
+        itemDescription: "An identifier.",
+      }),
+    ).toEqual({
+      type: "array",
+      items: { type: "string", minLength: 1, description: "An identifier." },
+      maxItems: 100,
+      uniqueItems: true,
+      description: "Unique identifiers.",
+    });
+  });
+});
+
 describe("jsonSchema.looseRequiredObject", () => {
   it("requires every property except explicitly optional properties", () => {
     expect(
@@ -101,5 +119,23 @@ describe("jsonSchema.optional", () => {
     const defaulted = jsonSchema.withDefault(described, "default-id");
 
     expect(jsonSchema.requiredObject("Wrapped optional use.", { id: defaulted })).not.toHaveProperty("required");
+  });
+});
+
+describe("jsonSchema.requireAnyProperty", () => {
+  it("requires at least one of the named object properties", () => {
+    const schema = jsonSchema.object(
+      "A partial update.",
+      {
+        name: jsonSchema.string("A new name."),
+        color: jsonSchema.string("A new color."),
+      },
+      { optional: ["name", "color"] },
+    );
+
+    expect(jsonSchema.requireAnyProperty(schema, ["name", "color"])).toMatchObject({
+      anyOf: [{ required: ["name"] }, { required: ["color"] }],
+    });
+    expect(schema).not.toHaveProperty("anyOf");
   });
 });

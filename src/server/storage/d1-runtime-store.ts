@@ -41,7 +41,7 @@ export class D1RuntimeDatabase implements RuntimeDatabase {
     const secretCodec = options.secretCodec ?? new PlainTextSecretCodec();
     this.connectionStore = new D1ConnectionStore(database, secretCodec);
     this.oauthClientConfigStore = new D1OAuthClientConfigStore(database, secretCodec);
-    this.oauthStateStore = new D1OAuthStateStore(database);
+    this.oauthStateStore = new D1OAuthStateStore(database, secretCodec);
     this.runtimeTokenStore = new D1RuntimeTokenStore(database);
     this.runtimePolicyStore = new D1RuntimePolicyStore(database);
     this.runLogStore = new D1RunLogStore(database, options.runLimit ?? DEFAULT_RUN_LIMIT);
@@ -195,9 +195,11 @@ export class D1OAuthClientConfigStore implements IOAuthClientConfigStore {
 
 export class D1OAuthStateStore implements IOAuthStateStore {
   private readonly database: D1DatabaseBinding;
+  private readonly secretCodec: ISecretCodec;
 
-  constructor(database: D1DatabaseBinding) {
+  constructor(database: D1DatabaseBinding, secretCodec: ISecretCodec) {
     this.database = database;
+    this.secretCodec = secretCodec;
   }
 
   async set(state: OAuthAuthorizationState): Promise<void> {
@@ -209,7 +211,7 @@ export class D1OAuthStateStore implements IOAuthStateStore {
         on conflict(state) do update set value = excluded.value, created_at = excluded.created_at
       `,
       )
-      .bind(state.state, JSON.stringify(state), state.createdAt)
+      .bind(state.state, await this.secretCodec.encode(JSON.stringify(state)), state.createdAt)
       .run();
   }
 
@@ -218,7 +220,9 @@ export class D1OAuthStateStore implements IOAuthStateStore {
       .prepare("delete from oauth_states where state = ? returning value")
       .bind(state)
       .first<RuntimeRow>();
-    return row ? parseJson<OAuthAuthorizationState>(readString(row, "value")) : undefined;
+    return row
+      ? parseJson<OAuthAuthorizationState>(await this.secretCodec.decode(readString(row, "value")))
+      : undefined;
   }
 }
 
@@ -234,9 +238,9 @@ export class D1RuntimeTokenStore implements IRuntimeTokenStore {
       .prepare(
         `
         insert into runtime_tokens (
-          id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, created_at, last_used_at
+          id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, allowed_connections, created_at, last_used_at
         )
-        values (?, ?, ?, ?, ?, ?, ?, ?)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?)
       `,
       )
       .bind(
@@ -246,6 +250,7 @@ export class D1RuntimeTokenStore implements IRuntimeTokenStore {
         JSON.stringify(record.allowedActions),
         JSON.stringify(record.blockedActions),
         JSON.stringify(record.allowedProxies),
+        JSON.stringify(record.allowedConnections ?? []),
         record.createdAt,
         record.lastUsedAt ?? null,
       )
@@ -256,7 +261,7 @@ export class D1RuntimeTokenStore implements IRuntimeTokenStore {
     const { results } = await this.database
       .prepare(
         `
-        select id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, created_at, last_used_at
+        select id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, allowed_connections, created_at, last_used_at
         from runtime_tokens
         where revoked_at is null
         order by created_at desc, id desc
@@ -270,7 +275,7 @@ export class D1RuntimeTokenStore implements IRuntimeTokenStore {
     const row = await this.database
       .prepare(
         `
-        select id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, created_at, last_used_at
+        select id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, allowed_connections, created_at, last_used_at
         from runtime_tokens
         where token_hash = ? and revoked_at is null
       `,
@@ -285,15 +290,16 @@ export class D1RuntimeTokenStore implements IRuntimeTokenStore {
       .prepare(
         `
         update runtime_tokens
-        set allowed_actions = ?, blocked_actions = ?, allowed_proxies = ?
+        set allowed_actions = ?, blocked_actions = ?, allowed_proxies = ?, allowed_connections = ?
         where id = ? and revoked_at is null
-        returning id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, created_at, last_used_at
+        returning id, name, token_hash, allowed_actions, blocked_actions, allowed_proxies, allowed_connections, created_at, last_used_at
       `,
       )
       .bind(
         JSON.stringify(policy.allowedActions),
         JSON.stringify(policy.blockedActions),
         JSON.stringify(policy.allowedProxies),
+        JSON.stringify(policy.allowedConnections ?? []),
         id,
       )
       .first<RuntimeRow>();
@@ -321,6 +327,7 @@ function readRuntimeTokenRow(row: RuntimeRow): RuntimeTokenRecord {
     allowedActions: parseJson(readString(row, "allowed_actions")),
     blockedActions: parseJson(readString(row, "blocked_actions")),
     allowedProxies: parseJson(readString(row, "allowed_proxies")),
+    allowedConnections: parseJson(readOptionalString(row, "allowed_connections") ?? "[]"),
     createdAt: readString(row, "created_at"),
     lastUsedAt: readOptionalString(row, "last_used_at"),
   };

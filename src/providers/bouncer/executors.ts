@@ -1,4 +1,5 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 
 import {
@@ -13,6 +14,7 @@ import {
 import {
   createProviderTimeout,
   defineApiKeyProviderExecutors,
+  defineProviderProxy,
   isAbortLikeError,
   ProviderRequestError,
   providerUserAgent,
@@ -25,7 +27,7 @@ const bouncerDefaultRequestTimeoutMs = 30_000;
 type BouncerRequestPhase = "validate" | "execute";
 type BouncerActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
-export const bouncerActionHandlers: Record<string, BouncerActionHandler> = {
+export const bouncerActionHandlers: ProviderActionHandlers<"bouncer", BouncerActionHandler> = {
   get_credits(_input, context) {
     return requestBouncerCredits({
       apiKey: context.apiKey,
@@ -160,7 +162,7 @@ export const credentialValidators: CredentialValidators = {
 
     return {
       profile: {
-        accountId: "bouncer",
+        accountId: service,
         displayName: "Bouncer API Key",
       },
       grantedScopes: [],
@@ -739,3 +741,9 @@ function parseTriState(value: unknown, endpoint: string, fieldName: string): str
 function invalidInputError(message: string): ProviderRequestError {
   return new ProviderRequestError(400, message);
 }
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: "https://api.usebouncer.com",
+  auth: { type: "api_key_header", name: "x-api-key" },
+});

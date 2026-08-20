@@ -1,4 +1,5 @@
-import type { CredentialValidators, ProviderExecutors } from "../../core/types.ts";
+import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { ApiKeyProviderContext } from "../provider-runtime.ts";
 
 import {
@@ -9,7 +10,12 @@ import {
   optionalRecord,
   optionalString,
 } from "../../core/cast.ts";
-import { defineApiKeyProviderExecutors, ProviderRequestError } from "../provider-runtime.ts";
+import {
+  defineApiKeyProviderExecutors,
+  defineProviderProxy,
+  providerProxyEndpointPrefixes,
+  ProviderRequestError,
+} from "../provider-runtime.ts";
 
 const service = "enigma";
 const enigmaGraphqlApiUrl = "https://api.enigma.com/graphql";
@@ -299,7 +305,7 @@ const enigmaCreateSuggestionMutation = `
   }
 `;
 
-const enigmaActionHandlers: Record<string, EnigmaActionHandler> = {
+const enigmaActionHandlers: ProviderActionHandlers<"enigma", EnigmaActionHandler> = {
   get_account(_input, context) {
     return enigmaGetAccount(context.apiKey, context.fetcher, context.signal, "execute");
   },
@@ -1292,3 +1298,10 @@ function pickOptionalListType(input: Record<string, unknown>, ...keys: string[])
 function nullableBoolean(value: unknown): boolean | null {
   return typeof value === "boolean" ? value : null;
 }
+
+export const proxy: ProviderProxyExecutor = defineProviderProxy({
+  service,
+  baseUrl: "https://api.enigma.com",
+  auth: { type: "api_key_header", name: "x-api-key" },
+  allowedEndpoint: providerProxyEndpointPrefixes("/graphql", "/v2/kyb"),
+});

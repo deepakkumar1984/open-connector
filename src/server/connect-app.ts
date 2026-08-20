@@ -2,7 +2,7 @@ import type { CatalogStore } from "../catalog-store.ts";
 import type { ActionPolicyService } from "../core/action-policy.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
-import type { ITransitFileService } from "./files/transit-file-store.ts";
+import type { ITransitFileService, TransitFileUpload } from "./files/transit-file-store.ts";
 import type { Logger } from "./logger.ts";
 import type { ISecretCodec } from "./secrets/secret-codec-core.ts";
 import type { RuntimeDatabase } from "./storage/runtime-database.ts";
@@ -21,10 +21,12 @@ export interface ConnectAppOptions {
   providerLoader: IProviderLoader;
   runtimeDatabase: RuntimeDatabase;
   transitFiles: ITransitFileService;
+  uploadTransitFile?: (request: Request) => Promise<TransitFileUpload>;
   publicOrigin: string;
   secretCodec: ISecretCodec;
   adminToken?: string;
   runtimeToken?: string;
+  allowedCustomOAuth?: string[];
   verifyRuntimeJwt?: RuntimeJwtVerifier;
   actionPolicy?: ActionPolicyService;
   registerStaticRoutes?: (app: Hono) => void;
@@ -41,10 +43,14 @@ export interface ConnectApp {
 export async function createConnectApp(options: ConnectAppOptions): Promise<ConnectApp> {
   const runtimeTokens = new RuntimeTokenService(options.runtimeDatabase.runtimeTokenStore, options.logger);
   const hasStoredRuntimeTokens = async (): Promise<boolean> => (await runtimeTokens.listTokens()).length > 0;
+  const allowedCustomOAuth = new Set(options.allowedCustomOAuth);
+  const isCustomClientConfigAllowed = (service: string): boolean =>
+    allowedCustomOAuth.has("*") || allowedCustomOAuth.has(service);
   const oauthClientConfigs = new OAuthClientConfigService({
     catalog: options.catalog,
     origin: options.publicOrigin,
     store: options.runtimeDatabase.oauthClientConfigStore,
+    isCustomClientConfigAvailable: (service) => options.secretCodec.encrypted && isCustomClientConfigAllowed(service),
   });
   const connections = new ConnectionService({
     catalog: options.catalog,
@@ -73,10 +79,13 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
         clientConfigs: oauthClientConfigs,
         connections,
         states: options.runtimeDatabase.oauthStateStore,
+        secretCodec: options.secretCodec,
+        isCustomClientConfigAllowed,
       }),
       actions,
       idempotency: options.runtimeDatabase.idempotencyStore,
       transitFiles: options.transitFiles,
+      uploadTransitFile: options.uploadTransitFile,
       runtimeTokens,
       runtimePolicyStore: options.runtimeDatabase.runtimePolicyStore,
       registerStaticRoutes: options.registerStaticRoutes,

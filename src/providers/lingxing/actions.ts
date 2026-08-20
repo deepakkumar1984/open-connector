@@ -5,21 +5,32 @@ import { defineProviderAction } from "../../core/provider-definition.ts";
 
 const service = "lingxing";
 
+const toolAnnotationsSchema = s.looseObject("MCP hints supplied by Lingxing about the tool's behavior.", {
+  title: s.optional(s.string("A human-readable title for the tool.")),
+  readOnlyHint: s.optional(s.boolean("Whether the tool is expected not to modify Lingxing data.")),
+  destructiveHint: s.optional(s.boolean("Whether the tool may perform destructive updates.")),
+  idempotentHint: s.optional(
+    s.boolean("Whether repeated calls with the same arguments are expected to have no additional effect."),
+  ),
+  openWorldHint: s.optional(s.boolean("Whether the tool may interact with external entities.")),
+});
+
 const mcpToolSummarySchema = s.object(
   "A tool currently exposed by the connected Lingxing MCP server.",
   {
     name: s.nonEmptyString("The exact MCP tool name to pass to call_tool."),
     description: s.string("The current tool description supplied by Lingxing MCP."),
+    annotations: toolAnnotationsSchema,
     inputSchema: s.looseObject("The current JSON Schema for the tool arguments, supplied by Lingxing MCP."),
   },
-  { optional: ["description"] },
+  { optional: ["description", "annotations"] },
 );
 
 export const lingxingActions: ActionDefinition[] = [
   defineProviderAction(service, {
     name: "list_tools",
     description:
-      "Discover the current Lingxing ERP MCP tools and their live input schemas before choosing a tool to call.",
+      "Discover the current Lingxing ERP MCP tools, behavior annotations, and live input schemas before choosing a tool to call.",
     inputSchema: s.actionInput({}, [], "No input is required."),
     outputSchema: s.actionOutput(
       {

@@ -1,8 +1,8 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { GrafanaActionName } from "./actions.ts";
+import type { ProviderActionHandlers } from "../provider-runtime.ts";
 
 import { compactObject, optionalBoolean, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
-import { assertPublicHttpUrl } from "../../core/request.ts";
+import { assertPublicHttpUrl, isPrivateNetworkAccessAllowed } from "../../core/request.ts";
 import {
   createProviderTimeout,
   isAbortLikeError,
@@ -47,7 +47,7 @@ export interface GrafanaContext {
   signal?: AbortSignal;
 }
 
-export const grafanaActionHandlers: Record<GrafanaActionName, GrafanaActionHandler> = {
+export const grafanaActionHandlers: ProviderActionHandlers<"grafana", GrafanaActionHandler> = {
   list_folders(input, context) {
     return executeListFolders(input, context);
   },
@@ -149,6 +149,7 @@ export function normalizeGrafanaBaseUrl(value: unknown): string {
   const url = assertPublicHttpUrl(value.trim(), {
     fieldName: "baseUrl",
     createError: (message) => new ProviderRequestError(400, message),
+    allowPrivateNetwork: isPrivateNetworkAccessAllowed(),
   });
 
   if (url.protocol !== "https:") {
