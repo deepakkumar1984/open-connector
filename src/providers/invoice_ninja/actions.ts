@@ -440,5 +440,3 @@ export const invoiceNinjaActions: ActionDefinition[] = [
     }),
   }),
 ];
-
-const invoiceNinjaActionByName = new Map(invoiceNinjaActions.map((action) => [action.name, action]));

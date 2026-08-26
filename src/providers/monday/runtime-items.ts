@@ -366,7 +366,11 @@ async function mondaySetItemDescriptionContent(input: MondayProviderActionInput,
     {
       query: `
         mutation SetItemDescriptionContent($item_id: ID!, $markdown: String!) {
-          set_item_description_content(item_id: $item_id, markdown: $markdown)
+          set_item_description_content(item_id: $item_id, markdown: $markdown) {
+            success
+            error
+            block_ids
+          }
         }
       `,
       variables: {

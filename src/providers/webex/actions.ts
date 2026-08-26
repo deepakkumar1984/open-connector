@@ -562,8 +562,6 @@ export const webexActions: ProviderActionDefinition[] = [
 
 export type WebexActionName = (typeof webexActions)[number]["name"];
 
-const webexActionByName = new Map(webexActions.map((item) => [item.name, item]));
-
 function resourceCrudActions<const TResource extends string>(definition: {
   resource: TResource;
   plural: string;

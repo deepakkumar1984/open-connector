@@ -380,6 +380,7 @@ describe("ConnectServer", () => {
     expect(listedAction).not.toHaveProperty("outputSchema");
     expect(listedAction).toHaveProperty("id");
     expect(listedAction).toHaveProperty("execution");
+    expect(listed[0]).toMatchObject({ scenario: "developer" });
 
     const actionResponse = await app.request(`/api/actions/${String(listedAction?.id)}`);
     await expect(actionResponse.json()).resolves.toHaveProperty("inputSchema");
@@ -939,6 +940,106 @@ describe("ConnectServer", () => {
     expect(logOutput).not.toContain("example-key");
     expect(logOutput).not.toContain("secret-message");
     expect(logOutput).not.toContain("secret-token");
+  });
+
+  it("propagates HTTP request cancellation to action execution", async () => {
+    const controller = new AbortController();
+    let executionStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      executionStarted = resolve;
+    });
+    let executionSignal: AbortSignal | undefined;
+    const providerLoader = new ActionProviderLoader(async (_input, context) => {
+      executionSignal = context.signal;
+      executionStarted?.();
+      await new Promise<void>((_resolve, reject) => {
+        if (!context.signal) {
+          reject(new Error("request signal missing"));
+          return;
+        }
+        context.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true });
+      });
+      return { ok: true, output: {} };
+    });
+    const runs = new MemoryRunLogStore();
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }], {
+      providerLoader,
+      runs,
+    }).createApp();
+    await app.request("/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
+    });
+    const request = new Request("http://localhost/v1/actions/example.echo", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ input: {} }),
+      signal: controller.signal,
+    });
+
+    const responsePromise = app.fetch(request);
+    await started;
+    controller.abort();
+    const response = await responsePromise;
+
+    expect(executionSignal?.aborted).toBe(true);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toMatchObject({
+      success: false,
+      errorCode: "execution_cancelled",
+    });
+    await expect(runs.list()).resolves.toMatchObject({
+      items: [expect.objectContaining({ caller: "http", ok: false, errorCode: "execution_cancelled" })],
+    });
+  });
+
+  it("propagates HTTP request cancellation to credential validation", async () => {
+    const controller = new AbortController();
+    let validationStarted: (() => void) | undefined;
+    const started = new Promise<void>((resolve) => {
+      validationStarted = resolve;
+    });
+    let validationSignal: AbortSignal | undefined;
+    const { entries, logger } = createTestLogger();
+    const providerLoader = new HangingCredentialValidatorLoader((signal) => {
+      validationSignal = signal;
+      validationStarted?.();
+    });
+    const app = createTestServer([apiKeyProvider], { logger, providerLoader }).createApp();
+    const request = new Request("http://localhost/api/connections/example", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ authType: "api_key", values: { apiKey: "example-key" } }),
+      signal: controller.signal,
+    });
+
+    const responsePromise = app.fetch(request);
+    await started;
+    controller.abort();
+    const response = await responsePromise;
+
+    expect(validationSignal?.aborted).toBe(true);
+    expect(response.status).toBe(400);
+    await expect(response.json()).resolves.toEqual({
+      error: {
+        code: "connection_cancelled",
+        message: "Credential validation was cancelled.",
+      },
+    });
+    expect(entries).toContainEqual({
+      level: "info",
+      fields: expect.objectContaining({ errorCode: "connection_cancelled" }),
+      message: "connection cancelled",
+    });
+    expect(entries).not.toContainEqual(
+      expect.objectContaining({
+        level: "warn",
+        message: "connection failed",
+      }),
+    );
+    const connections = await app.request("/api/connections");
+    await expect(connections.json()).resolves.toEqual([]);
   });
 
   it("logs failed action runs with error codes", async () => {
@@ -3588,6 +3689,42 @@ class EmptyProviderLoader implements IProviderLoader {
 
   async loadCredentialValidators(): Promise<undefined> {
     return undefined;
+  }
+}
+
+class HangingCredentialValidatorLoader implements IProviderLoader {
+  private readonly onStarted: (signal: AbortSignal | undefined) => void;
+
+  constructor(onStarted: (signal: AbortSignal | undefined) => void) {
+    this.onStarted = onStarted;
+  }
+
+  async loadActionExecutor(): Promise<never> {
+    throw new Error("No actions are available in this test.");
+  }
+
+  async loadProxyExecutor(): Promise<ProviderProxyExecutor | undefined> {
+    return undefined;
+  }
+
+  async loadCredentialValidators(): Promise<{
+    apiKey(
+      _input: { apiKey: string; values: Record<string, string> },
+      options: { signal?: AbortSignal },
+    ): Promise<void>;
+  }> {
+    return {
+      apiKey: async (_input, options) => {
+        this.onStarted(options.signal);
+        await new Promise<void>((_resolve, reject) => {
+          if (!options.signal) {
+            reject(new Error("request signal missing"));
+            return;
+          }
+          options.signal.addEventListener("abort", () => reject(new Error("request aborted")), { once: true });
+        });
+      },
+    };
   }
 }
 

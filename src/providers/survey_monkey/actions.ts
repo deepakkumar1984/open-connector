@@ -391,5 +391,3 @@ export const surveyMonkeyActions: ActionDefinition[] = [
 ] satisfies ActionDefinition[];
 
 export type SurveyMonkeyActionName = (typeof surveyMonkeyActions)[number]["name"];
-
-const surveyMonkeyActionByName = new Map(surveyMonkeyActions.map((action) => [action.name, action] as const));

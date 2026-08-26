@@ -7,7 +7,6 @@ import type {
 } from "./oauth-client-config-service.ts";
 
 import { createHash, randomBytes } from "node:crypto";
-import { normalizeSlackAuthorizationCredential } from "../providers/slack/oauth.ts";
 import { requestAuthorizationCodeToken } from "./oauth-token.ts";
 
 /**
@@ -27,6 +26,8 @@ export interface OAuthAuthorizationStartInput {
 export interface OAuthAuthorizationCompleteInput {
   state: string;
   code: string;
+  callbackParameters?: Record<string, string>;
+  signal?: AbortSignal;
 }
 
 /**
@@ -149,7 +150,7 @@ export class OAuthFlowService {
       );
     }
 
-    let tokenResponse = await requestAuthorizationCodeToken({
+    const tokenResponse = await requestAuthorizationCodeToken({
       code: input.code,
       state: pending.state,
       clientId: config.clientId,
@@ -160,16 +161,14 @@ export class OAuthFlowService {
       tokenEndpointAuthMethod: auth.tokenEndpointAuthMethod,
       tokenRequestFormat: auth.tokenRequestFormat,
       tokenUrl: this.clientConfigs.resolveEndpointUrl(pending.service, auth.tokenUrl, config),
-      extraFields: createTokenExtraFields(pending),
+      extraFields: createTokenExtraFields(pending, auth.tokenRequestCallbackParameters, input.callbackParameters),
       createError: (message) => new OAuthFlowError("oauth_token_exchange_failed", message),
     });
-    if (pending.service == "slack") {
-      // Slack returns a separately rotated user grant in `authed_user`.
-      // Move it out of non-secret metadata before storing the credential.
-      tokenResponse = normalizeSlackAuthorizationCredential(tokenResponse);
-    }
+    const refreshParameters = readCallbackParameters(auth.tokenRequestCallbackParameters, input.callbackParameters);
     const oauthCredential = {
       ...tokenResponse,
+      providerSecret:
+        Object.keys(refreshParameters).length > 0 ? { oauthRefreshParameters: refreshParameters } : undefined,
       metadata: {
         ...tokenResponse.metadata,
         oauthClientId: config.clientId,
@@ -179,7 +178,7 @@ export class OAuthFlowService {
       },
     };
 
-    await this.connections.setOAuthCredential(pending.service, oauthCredential, pending.connectionName);
+    await this.connections.setOAuthCredential(pending.service, oauthCredential, pending.connectionName, input.signal);
     return {
       service: pending.service,
       connected: true,
@@ -214,14 +213,26 @@ function setAuthorizationParam(
   }
 }
 
-function createTokenExtraFields(state: OAuthAuthorizationState): Record<string, string> | undefined {
-  if (!state.pkceCodeVerifier) {
-    return undefined;
-  }
+function createTokenExtraFields(
+  state: OAuthAuthorizationState,
+  parameterNames: readonly string[] | undefined,
+  callbackParameters: Record<string, string> | undefined,
+): Record<string, string> | undefined {
+  const fields = readCallbackParameters(parameterNames, callbackParameters);
+  if (state.pkceCodeVerifier) fields.code_verifier = state.pkceCodeVerifier;
+  return Object.keys(fields).length > 0 ? fields : undefined;
+}
 
-  return {
-    code_verifier: state.pkceCodeVerifier,
-  };
+function readCallbackParameters(
+  parameterNames: readonly string[] | undefined,
+  values: Record<string, string> | undefined,
+): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const name of parameterNames ?? []) {
+    const value = values?.[name];
+    if (value) fields[name] = value;
+  }
+  return fields;
 }
 
 function isExpiredOAuthState(state: OAuthAuthorizationState, maxAgeMs: number): boolean {

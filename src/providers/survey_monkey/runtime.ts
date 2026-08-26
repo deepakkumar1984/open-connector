@@ -268,18 +268,6 @@ export const surveyMonkeyActionHandlers: Record<string, SurveyMonkeyActionHandle
   },
 } satisfies Record<string, SurveyMonkeyActionHandler>;
 
-async function executeSurveyMonkeyAction(
-  actionName: string,
-  input: Record<string, unknown>,
-  context: SurveyMonkeyActionContext,
-) {
-  const handler = (surveyMonkeyActionHandlers as Record<string, SurveyMonkeyActionHandler>)[actionName];
-  if (!handler) {
-    throw new ConnectorError("invalid_input", `unknown survey_monkey action: ${actionName}`, 400);
-  }
-  return handler(input, context);
-}
-
 export async function validateSurveyMonkeyCredential(
   input: Record<string, string>,
   fetcher: typeof fetch,
@@ -307,41 +295,6 @@ export async function validateSurveyMonkeyCredential(
   };
 }
 
-async function fetchSurveyMonkeyGrantedProviderScopes(accessToken: string, apiBaseUrl: string, fetcher: typeof fetch) {
-  const user = requireObject(
-    await requestSurveyMonkeyJson({
-      accessToken,
-      apiBaseUrl,
-      path: surveyMonkeyValidationPath,
-      method: "GET",
-      fetcher,
-      phase: "validate",
-    }),
-    "SurveyMonkey user",
-  );
-  return readGrantedProviderScopes(user);
-}
-
-async function fetchSurveyMonkeyCurrentAccount(
-  accessToken: string,
-  fetcher: typeof fetch,
-  apiBaseUrl: string,
-): Promise<AccountProfile> {
-  const normalizedApiBaseUrl = normalizeSurveyMonkeyApiBaseUrl(apiBaseUrl);
-  const user = requireObject(
-    await requestSurveyMonkeyJson({
-      accessToken,
-      apiBaseUrl: normalizedApiBaseUrl,
-      path: surveyMonkeyValidationPath,
-      method: "GET",
-      fetcher,
-      phase: "validate",
-    }),
-    "SurveyMonkey user",
-  );
-  return buildSurveyMonkeyAccountProfile(user, normalizedApiBaseUrl);
-}
-
 function normalizeSurveyMonkeyApiBaseUrl(value: unknown) {
   if (typeof value !== "string" || !value.trim()) {
     throw new ConnectorError("invalid_input", "SurveyMonkey apiBaseUrl is required", 400);
@@ -364,10 +317,6 @@ function normalizeSurveyMonkeyApiBaseUrl(value: unknown) {
     throw new ConnectorError("invalid_input", "SurveyMonkey apiBaseUrl must be the US, EU, or Canada API origin", 400);
   }
   return normalized;
-}
-
-function resolveSurveyMonkeyApiBaseUrl(providerMetadata: Record<string, unknown> | undefined) {
-  return normalizeSurveyMonkeyApiBaseUrl(providerMetadata?.apiBaseUrl);
 }
 
 async function requestSurveyMonkeyJson(input: {

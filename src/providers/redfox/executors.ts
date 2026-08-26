@@ -24,6 +24,7 @@ interface RedfoxEndpoint {
   path: string;
   buildBody(input: Record<string, unknown>): RedfoxBody;
   successCodes?: readonly number[];
+  responseMode?: "wrapped" | "directWorkList";
 }
 
 const redfoxEndpoints: ProviderActionSources<"redfox", RedfoxEndpoint> = {
@@ -64,7 +65,19 @@ const redfoxEndpoints: ProviderActionSources<"redfox", RedfoxEndpoint> = {
     },
   },
   search_douyin_ai_creations: { path: "/story/api/parseWork/queryDyAiMsgs", buildBody: buildAiCreationSearchBody },
-  search_xiaohongshu_works: { path: "/story/api/xhsUser/searchArticle", buildBody: buildSearchBody },
+  search_xiaohongshu_works: {
+    path: "/story/api/xhs/search/keywordSearchWork",
+    responseMode: "directWorkList",
+    buildBody(input) {
+      return {
+        keyword: readRequiredString(input.keyword, "keyword"),
+        noteTime: readOptionalString(input.noteTime),
+        sort: readOptionalString(input.sort),
+        page: readOptionalPositiveInteger(input.page, "page"),
+        noteType: readOptionalString(input.noteType),
+      };
+    },
+  },
   search_xiaohongshu_users: { path: "/story/api/xhsUser/searchUser", buildBody: buildSearchBody },
   get_xiaohongshu_work: {
     path: "/story/api/xhsUser/queryWorkDetail",
@@ -170,6 +183,7 @@ export const redfoxActionHandlers: ProviderActionHandlers<"redfox", RedfoxAction
         path: endpoint.path,
         body: endpoint.buildBody(input),
         successCodes: endpoint.successCodes,
+        responseMode: endpoint.responseMode,
         context,
         mode: "execute",
       }),
@@ -209,6 +223,7 @@ async function requestRedfoxJson(input: {
   path: string;
   body: RedfoxBody;
   successCodes?: readonly number[];
+  responseMode?: "wrapped" | "directWorkList";
   context: Pick<ApiKeyProviderContext, "fetcher" | "signal">;
   mode: RedfoxRequestMode;
 }): Promise<unknown> {
@@ -235,6 +250,14 @@ async function requestRedfoxJson(input: {
 
   if (!response.ok) {
     throw createRedfoxHttpError(response.status, payload, input.mode);
+  }
+
+  if (input.responseMode === "directWorkList") {
+    const record = optionalRecord(payload);
+    if (!record || !Array.isArray(record.workList)) {
+      throw new ProviderRequestError(502, "RedFoxHub returned an invalid Xiaohongshu work-list response");
+    }
+    return { code: 2000, msg: "成功", data: record };
   }
 
   const normalized = normalizeRedfoxPayload(payload);

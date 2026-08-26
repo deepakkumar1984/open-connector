@@ -492,5 +492,3 @@ export const getresponseActions: ActionDefinition[] = [
 ] satisfies ActionDefinition[];
 
 export type GetresponseActionName = (typeof getresponseActions)[number]["name"];
-
-const getresponseActionByName = new Map(getresponseActions.map((action) => [action.name, action]));

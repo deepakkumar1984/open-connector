@@ -390,7 +390,13 @@ export class ConnectServer {
         return true;
       }
 
-      return [provider.service, provider.displayName, provider.categories.join(" "), provider.authTypes.join(" ")]
+      return [
+        provider.service,
+        provider.displayName,
+        provider.categories.join(" "),
+        provider.scenario,
+        provider.authTypes.join(" "),
+      ]
         .join(" ")
         .toLowerCase()
         .includes(query);
@@ -474,7 +480,7 @@ export class ConnectServer {
     if (!policy.evaluate(action).allowed) {
       return writeRuntimeActionHttpResult(
         context,
-        await this.executeRuntimeAction(actionId, input, connectionName, policy, runtimeGrant),
+        await this.executeRuntimeAction(actionId, input, connectionName, policy, runtimeGrant, context.req.raw.signal),
       );
     }
     const idempotencyKey = readIdempotencyKey(context.req.header("idempotency-key"));
@@ -490,7 +496,7 @@ export class ConnectServer {
     if (!idempotencyKey.key) {
       return writeRuntimeActionHttpResult(
         context,
-        await this.executeRuntimeAction(actionId, input, connectionName, policy, runtimeGrant),
+        await this.executeRuntimeAction(actionId, input, connectionName, policy, runtimeGrant, context.req.raw.signal),
       );
     }
 
@@ -544,7 +550,14 @@ export class ConnectServer {
       return writeRuntimeActionHttpResult(context, claim.response);
     }
 
-    const result = await this.executeRuntimeAction(actionId, input, connectionName, policy, runtimeGrant);
+    const result = await this.executeRuntimeAction(
+      actionId,
+      input,
+      connectionName,
+      policy,
+      runtimeGrant,
+      context.req.raw.signal,
+    );
     const completed = await this.options.idempotency.complete({
       keyHash,
       requestHash,
@@ -565,6 +578,7 @@ export class ConnectServer {
     connectionName: string | undefined,
     policy: ActionPolicySnapshot,
     runtimeGrant: RuntimeGrant | undefined,
+    signal: AbortSignal | undefined,
   ): Promise<RuntimeActionHttpResult> {
     try {
       const run = await this.options.actions.run({
@@ -574,6 +588,7 @@ export class ConnectServer {
         connectionName,
         policy,
         runtimeTokenId: runtimeGrant?.tokenId,
+        signal,
       });
       if (!run) {
         return serializeRuntimeFailure(unknownActionFailure(actionId));
@@ -742,6 +757,7 @@ export class ConnectServer {
           actionSearch: this.actionSearch,
           getPolicySnapshot: () => this.getPolicySnapshot(context),
           runtimeGrant: readRuntimeGrant(context),
+          signal: context.req.raw.signal,
         }),
       { legacy: "stateless", responseMode: "json" },
     );
@@ -806,7 +822,11 @@ export class ConnectServer {
       this.options.logger?.info(logContext, "connection started");
       return this.writeConnectionResult(
         context,
-        this.options.connections.connectWithApiKey(service, { values, connectionName }),
+        this.options.connections.connectWithApiKey(service, {
+          values,
+          connectionName,
+          signal: context.req.raw.signal,
+        }),
         logContext,
       );
     }
@@ -814,7 +834,11 @@ export class ConnectServer {
       this.options.logger?.info(logContext, "connection started");
       return this.writeConnectionResult(
         context,
-        this.options.connections.connectWithCustomCredential(service, { values, connectionName }),
+        this.options.connections.connectWithCustomCredential(service, {
+          values,
+          connectionName,
+          signal: context.req.raw.signal,
+        }),
         logContext,
       );
     }
@@ -1015,7 +1039,14 @@ export class ConnectServer {
 
     let service: string;
     try {
-      service = (await this.options.oauthFlow.completeAuthorization({ state, code })).service;
+      service = (
+        await this.options.oauthFlow.completeAuthorization({
+          state,
+          code,
+          callbackParameters: Object.fromEntries(new URL(context.req.url).searchParams),
+          signal: context.req.raw.signal,
+        })
+      ).service;
       this.options.logger?.info(
         {
           ...logContext,
@@ -1025,12 +1056,13 @@ export class ConnectServer {
       );
     } catch (error) {
       if (error instanceof OAuthFlowError || error instanceof ConnectionError) {
-        this.options.logger?.warn(
+        const cancelled = error instanceof ConnectionError && error.code === "connection_cancelled";
+        this.options.logger?.[cancelled ? "info" : "warn"](
           {
             ...logContext,
             errorCode: error.code,
           },
-          "oauth callback failed",
+          cancelled ? "oauth callback cancelled" : "oauth callback failed",
         );
         return jsonError(context, error.code === "unknown_service" ? 404 : 400, error.code, error.message);
       }
@@ -1057,12 +1089,17 @@ export class ConnectServer {
     } catch (error) {
       if (error instanceof ConnectionError) {
         if (logContext) {
-          this.options.logger?.warn(
+          const cancelled = error.code === "connection_cancelled";
+          this.options.logger?.[cancelled ? "info" : "warn"](
             {
               ...logContext,
               errorCode: error.code,
             },
-            logContext.operation === "disconnect" ? "connection disconnect failed" : "connection failed",
+            cancelled
+              ? "connection cancelled"
+              : logContext.operation === "disconnect"
+                ? "connection disconnect failed"
+                : "connection failed",
           );
         }
         return jsonError(context, error.code === "unknown_service" ? 404 : 400, error.code, error.message);

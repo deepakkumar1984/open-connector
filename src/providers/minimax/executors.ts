@@ -67,6 +67,10 @@ export const minimaxActionHandlers: ProviderActionHandlers<"minimax", MinimaxAct
     const fileId = readInputString(input.file_id, "file_id");
     return minimaxGetJson(`/v1/files/retrieve?file_id=${encodeURIComponent(fileId)}`, context);
   },
+  text_to_audio(input, context) {
+    assertStreamingDisabled(input);
+    return minimaxPostJson("/v1/t2a_v2", normalizeMinimaxAudioBody(input), context);
+  },
 };
 
 export const executors: ProviderExecutors = defineProviderExecutors<MinimaxActionContext>({
@@ -233,6 +237,16 @@ function normalizeMinimaxVideoV2Body(input: Record<string, unknown>): Record<str
   });
 }
 
+function normalizeMinimaxAudioBody(input: Record<string, unknown>): Record<string, unknown> {
+  return compactObject({
+    ...input,
+    model: trimString(input.model),
+    text: trimString(input.text),
+    language_boost: trimString(input.language_boost),
+    output_format: trimString(input.output_format),
+  });
+}
+
 function createVideoGenerationV2ListPath(input: Record<string, unknown>): string {
   const search = new URLSearchParams();
   appendQueryValue(search, "page_num", input.page_num);
@@ -289,7 +303,7 @@ function mapMinimaxError(status: number, payload: Record<string, unknown>): Prov
   if (status === 401 || status === 403 || errorCode === "1004" || errorCode === "2049") {
     return new ProviderRequestError(401, message, payload);
   }
-  if (status === 429 || errorCode === "1002" || errorCode === "1008") {
+  if (status === 429 || errorCode === "1002" || errorCode === "1008" || errorCode === "1039") {
     return new ProviderRequestError(429, message, payload);
   }
   if (status >= 400 && status < 500) {

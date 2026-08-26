@@ -59,5 +59,3 @@ export const wecomMcpActions: ActionDefinition[] = [
     }),
   }),
 ];
-
-const wecomMcpActionByName = new Map(wecomMcpActions.map((action) => [action.name, action]));

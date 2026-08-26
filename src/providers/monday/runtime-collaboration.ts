@@ -338,7 +338,7 @@ async function mondayUpdateDocName(input: MondayProviderActionInput, fetcher: ty
     input.apiKey,
     {
       query: `
-        mutation UpdateDocName($docId: Int!, $name: String!) {
+        mutation UpdateDocName($docId: ID!, $name: String!) {
           update_doc_name(docId: $docId, name: $name)
         }
       `,

@@ -1,7 +1,6 @@
 import { compactObject, optionalBoolean, optionalInteger, optionalString } from "../../core/cast.ts";
 import { createProviderTimeout, ProviderRequestError, providerUserAgent } from "../provider-runtime.ts";
 
-const helpscoutApiBaseUrl = "https://api.helpscout.net/v2";
 const helpscoutRequestTimeoutMs = 30_000;
 
 class HelpscoutError extends ProviderRequestError {

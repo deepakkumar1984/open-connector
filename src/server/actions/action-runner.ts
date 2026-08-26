@@ -27,6 +27,7 @@ export interface RunActionInput {
   connectionName?: string;
   policy?: ActionPolicySnapshot;
   runtimeTokenId?: string;
+  signal?: AbortSignal;
 }
 
 export interface ActionRunResult {
@@ -76,9 +77,12 @@ export class ActionRunner {
     let result: ExecutionResult;
     if (!policy.allowed) {
       result = { ok: false, error: { code: policy.code, message: policy.message } };
+    } else if (input.signal?.aborted) {
+      result = cancelledExecutionResult();
     } else {
       try {
         const summary = await this.options.connections.getConnectionSummary(action.service, input.connectionName);
+        input.signal?.throwIfAborted();
         const connectionPolicy =
           summary?.authType === "no_auth" ? undefined : snapshot?.evaluateConnection(summary?.id);
         if (connectionPolicy && !connectionPolicy.allowed) {
@@ -86,6 +90,7 @@ export class ActionRunner {
           result = { ok: false, error: { code: policy.code, message: policy.message } };
         } else {
           connection = await this.options.connections.resolveForExecution(action.service, input.connectionName);
+          input.signal?.throwIfAborted();
           const executor = action.execution.locallyExecutable
             ? await this.options.providerLoader.loadActionExecutor(
                 action.service,
@@ -93,19 +98,25 @@ export class ActionRunner {
                 this.options.catalog.providers.find((provider) => provider.service === action.service)?.displayName,
               )
             : undefined;
+          input.signal?.throwIfAborted();
           result = await executeProviderAction(
             action,
             executor,
             input.input,
-            this.createExecutionContext(connection.getCredential),
+            this.createExecutionContext(connection.getCredential, input.signal),
           );
+          if (input.signal?.aborted) {
+            result = cancelledExecutionResult();
+          }
         }
       } catch (error) {
         const missingConnectionPolicy =
           error instanceof ConnectionError && error.code === "connection_not_found"
             ? snapshot?.evaluateConnection()
             : undefined;
-        if (missingConnectionPolicy && !missingConnectionPolicy.allowed) {
+        if (input.signal?.aborted) {
+          result = cancelledExecutionResult();
+        } else if (missingConnectionPolicy && !missingConnectionPolicy.allowed) {
           policy = missingConnectionPolicy;
           result = { ok: false, error: { code: policy.code, message: policy.message } };
         } else {
@@ -161,6 +172,8 @@ export class ActionRunner {
     };
     if (result.ok) {
       this.options.logger?.info(completedLogContext, "action run completed");
+    } else if (result.error?.code === "execution_cancelled") {
+      this.options.logger?.info(completedLogContext, "action run cancelled");
     } else {
       this.options.logger?.warn(completedLogContext, "action run failed");
     }
@@ -176,9 +189,13 @@ export class ActionRunner {
     return this.options.runs.get(id);
   }
 
-  private createExecutionContext(getCredential: ExecutionConnection["getCredential"]): ExecutionContext {
+  private createExecutionContext(
+    getCredential: ExecutionConnection["getCredential"],
+    signal: AbortSignal | undefined,
+  ): ExecutionContext {
     const context: ExecutionContext = {
       getCredential,
+      signal,
     };
     if (this.options.transitFiles) {
       context.transitFiles = this.options.transitFiles;
@@ -194,4 +211,14 @@ export class ActionRunner {
       return "[unavailable]";
     }
   }
+}
+
+function cancelledExecutionResult(): ExecutionResult {
+  return {
+    ok: false,
+    error: {
+      code: "execution_cancelled",
+      message: "Action execution was cancelled.",
+    },
+  };
 }

@@ -2,7 +2,7 @@ import type { ResolvedCredential } from "../core/types.ts";
 import type { OAuthClientConfigService } from "./oauth-client-config-service.ts";
 
 import { ConnectionError } from "../connection-service.ts";
-import { refreshSlackOAuthCredential } from "../providers/slack/oauth.ts";
+import { optionalRecord, stringRecord } from "../core/cast.ts";
 import { readOAuthClientConfigMetadata } from "./oauth-client-config-service.ts";
 import { expiresAtFromLifetime, requestRefreshToken } from "./oauth-token.ts";
 
@@ -39,16 +39,13 @@ export class OAuthCredentialRefreshService implements IOAuthCredentialRefresher 
         clientSecret: config.clientSecret,
         responseEnvelope: auth.tokenResponseEnvelope,
         refreshToken: value,
+        extraFields: readOAuthRefreshParameters(credential.providerSecret),
         tokenRequestFields: auth.tokenRequestFields,
         tokenEndpointAuthMethod: auth.tokenEndpointAuthMethod,
         tokenRequestFormat: auth.tokenRequestFormat,
         tokenUrl: this.clientConfigs.resolveEndpointUrl(service, auth.refreshTokenUrl ?? auth.tokenUrl, config),
         createError: (message) => new ConnectionError("oauth_token_refresh_failed", message),
       });
-    if (service == "slack") {
-      return refreshSlackOAuthCredential(credential, requestTokenRefresh);
-    }
-
     const refreshed = await requestTokenRefresh(credential.refreshToken ?? "");
     const expiresIn =
       refreshed.expiresAt === undefined ? credential.metadata.expires_in : refreshed.metadata.expires_in;
@@ -73,4 +70,13 @@ export class OAuthCredentialRefreshService implements IOAuthCredentialRefresher 
       },
     };
   }
+}
+
+function readOAuthRefreshParameters(
+  providerSecret: Record<string, unknown> | undefined,
+): Record<string, string> | undefined {
+  const value = optionalRecord(providerSecret?.oauthRefreshParameters);
+  if (!value) return undefined;
+  const fields = stringRecord(value);
+  return Object.keys(fields).length > 0 ? fields : undefined;
 }
