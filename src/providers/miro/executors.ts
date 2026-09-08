@@ -21,9 +21,12 @@ import { queryParams } from "../../core/request.ts";
 import {
   defineOAuthProviderExecutors,
   defineProviderProxy,
+  providerInputError,
   ProviderRequestError,
+  providerResponseError,
   providerUserAgent,
   readProviderJsonBody,
+  requiredInputString,
   setSearchParams,
 } from "../provider-runtime.ts";
 
@@ -80,7 +83,7 @@ export const miroActionHandlers: ProviderActionHandlers<"miro", MiroActionHandle
     };
   },
   async get_board(input, context): Promise<unknown> {
-    const boardId = requireInputString(input.boardId, "boardId");
+    const boardId = requiredInputString(input.boardId, "boardId");
     return {
       board: requireMiroObject(
         await requestMiroJson({
@@ -102,7 +105,7 @@ export const miroActionHandlers: ProviderActionHandlers<"miro", MiroActionHandle
           path: "/v2/boards",
           phase: "execute",
           body: compactObject({
-            name: requireInputString(input.name, "name"),
+            name: requiredInputString(input.name, "name"),
             description: optionalString(input.description),
             teamId: optionalString(input.teamId),
             projectId: optionalString(input.projectId),
@@ -114,7 +117,7 @@ export const miroActionHandlers: ProviderActionHandlers<"miro", MiroActionHandle
     };
   },
   async list_items(input, context): Promise<unknown> {
-    const boardId = requireInputString(input.boardId, "boardId");
+    const boardId = requiredInputString(input.boardId, "boardId");
     const payload = requireMiroObject(
       await requestMiroJson({
         ...context,
@@ -136,8 +139,8 @@ export const miroActionHandlers: ProviderActionHandlers<"miro", MiroActionHandle
     };
   },
   async get_item(input, context): Promise<unknown> {
-    const boardId = requireInputString(input.boardId, "boardId");
-    const itemId = requireInputString(input.itemId, "itemId");
+    const boardId = requiredInputString(input.boardId, "boardId");
+    const itemId = requiredInputString(input.itemId, "itemId");
     return {
       item: requireMiroObject(
         await requestMiroJson({
@@ -191,7 +194,7 @@ async function createBoardItem(
   endpoint: "sticky_notes" | "texts",
   resourceName: string,
 ): Promise<{ item: Record<string, unknown> }> {
-  const boardId = requireInputString(input.boardId, "boardId");
+  const boardId = requiredInputString(input.boardId, "boardId");
   const data = requiredRecord(input.data, "data", providerInputError);
   requiredString(data.content, "data.content", providerInputError);
   const geometry = optionalRecord(input.geometry);
@@ -301,16 +304,4 @@ function requireMiroObject(value: unknown, source: string): Record<string, unkno
     throw new ProviderRequestError(502, `Miro ${source} must be an object`, value);
   }
   return object;
-}
-
-function requireInputString(value: unknown, field: string): string {
-  return requiredString(value, field, providerInputError);
-}
-
-function providerInputError(message: string): ProviderRequestError {
-  return new ProviderRequestError(400, message);
-}
-
-function providerResponseError(message: string): ProviderRequestError {
-  return new ProviderRequestError(502, message);
 }

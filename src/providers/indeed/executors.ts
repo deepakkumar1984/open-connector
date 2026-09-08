@@ -11,7 +11,12 @@ import {
   requiredString,
   requiredStringArray,
 } from "../../core/cast.ts";
-import { defineOAuthProviderExecutors, ProviderRequestError, readProviderJson } from "../provider-runtime.ts";
+import {
+  defineOAuthProviderExecutors,
+  providerInputError,
+  ProviderRequestError,
+  readProviderJson,
+} from "../provider-runtime.ts";
 
 const service = "indeed";
 const graphQlUrl = "https://apis.indeed.com/graphql";
@@ -38,16 +43,6 @@ const jobSelection = `
 const actionHandlers: ProviderActionHandlers<"indeed", IndeedActionHandler> = {
   get_current_user(_input, context) {
     return requestUserInfo(context);
-  },
-  execute_graphql(input, context) {
-    return requestGraphQl(
-      {
-        query: requiredString(input.query, "query", badInput),
-        variables: optionalRecord(input.variables),
-        operationName: optionalString(input.operationName),
-      },
-      context,
-    );
   },
   async find_employer_jobs(input, context) {
     const filters = {
@@ -80,7 +75,7 @@ const actionHandlers: ProviderActionHandlers<"indeed", IndeedActionHandler> = {
     const payload = await requestGraphQl(
       {
         query: `query GetEmployerJob($id: ID!) { node(id: $id) { ... on EmployerJob { ${jobSelection} } } }`,
-        variables: { id: requiredString(input.id, "id", badInput) },
+        variables: { id: requiredString(input.id, "id", providerInputError) },
       },
       context,
     );
@@ -90,14 +85,14 @@ const actionHandlers: ProviderActionHandlers<"indeed", IndeedActionHandler> = {
     const payload = await requestGraphQl(
       {
         query: `query GetEmployerJobs($ids: [ID!]!) { nodes(ids: $ids) { ... on EmployerJob { ${jobSelection} } } }`,
-        variables: { ids: requiredStringArray(input.ids, "ids", badInput) },
+        variables: { ids: requiredStringArray(input.ids, "ids", providerInputError) },
       },
       context,
     );
     return { jobs: readGraphQlData(payload).nodes ?? [] };
   },
   update_sourced_job_postings(input, context) {
-    const update = requiredRecord(input.update, "update", badInput);
+    const update = requiredRecord(input.update, "update", providerInputError);
     return requestGraphQl(
       {
         query: `mutation UpdateSourcedJobPostings($input: UpdateSourcedJobPostingsInput!) {
@@ -116,7 +111,9 @@ const actionHandlers: ProviderActionHandlers<"indeed", IndeedActionHandler> = {
         }`,
         variables: {
           input: {
-            updates: [{ sourcedPostingId: requiredString(input.sourcedPostingId, "sourcedPostingId", badInput) }],
+            updates: [
+              { sourcedPostingId: requiredString(input.sourcedPostingId, "sourcedPostingId", providerInputError) },
+            ],
           },
         },
       },
@@ -144,7 +141,6 @@ export const credentialValidators: CredentialValidators = {
 interface GraphQlRequest {
   query: string;
   variables?: Record<string, unknown>;
-  operationName?: string;
 }
 
 async function requestGraphQl(input: GraphQlRequest, context: OAuthProviderContext): Promise<Record<string, unknown>> {
@@ -180,8 +176,4 @@ function readGraphQlField(payload: Record<string, unknown>, field: string): unkn
   const value = readGraphQlData(payload)[field];
   if (value !== undefined) return value;
   throw new ProviderRequestError(502, `Indeed GraphQL response did not contain ${field}`, payload.errors);
-}
-
-function badInput(message: string): ProviderRequestError {
-  return new ProviderRequestError(400, message);
 }

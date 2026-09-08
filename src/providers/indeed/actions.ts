@@ -55,18 +55,6 @@ export const indeedActions: readonly ActionDefinition[] = [
     ),
   }),
   defineProviderAction(service, {
-    name: "execute_graphql",
-    description: "Execute an approved Indeed Partner GraphQL query or mutation and return its data and errors.",
-    requiredScopes: readScopes,
-    providerPermissions: readScopes,
-    inputSchema: s.object({
-      query: s.nonWhitespaceString("GraphQL document to execute."),
-      variables: s.optional(s.object({}, { additionalProperties: true })),
-      operationName: s.optional(s.nonEmptyString("Operation name when the document contains multiple operations.")),
-    }),
-    outputSchema: graphQlOutputSchema,
-  }),
-  defineProviderAction(service, {
     name: "find_employer_jobs",
     description: "List jobs for the employer represented by the OAuth token, with filters and cursor pagination.",
     requiredScopes: readScopes,
