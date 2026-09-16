@@ -3,6 +3,7 @@ import type { ActionPolicyService } from "../core/action-policy.ts";
 import type { TransitFileUpload } from "../core/types.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
+import type { ConnectionEventDispatcher } from "./connection-events.ts";
 import type { ITransitFileService } from "./files/transit-file-store.ts";
 import type { Logger } from "./logger.ts";
 import type { ISecretCodec } from "./secrets/secret-codec-core.ts";
@@ -30,6 +31,7 @@ export interface ConnectAppOptions {
   runtimeToken?: string;
   allowedCustomOAuth?: string[];
   verifyRuntimeJwt?: RuntimeJwtVerifier;
+  connectionEvents?: ConnectionEventDispatcher;
   actionPolicy?: ActionPolicyService;
   registerStaticRoutes?: (app: Hono) => void;
   logger?: Logger;
@@ -91,6 +93,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
         providerLoader: options.providerLoader,
         states: options.runtimeDatabase.oauthStateStore,
         requests: options.runtimeDatabase.connectionRequestStore,
+        events: options.connectionEvents,
         secretCodec: options.secretCodec,
         isCustomClientConfigAllowed,
       }),

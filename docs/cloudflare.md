@@ -157,6 +157,20 @@ cleaned up automatically. Workers KV applies the configured TTL when each file i
 deletes it automatically. KV clamps `OOMOL_CONNECT_TRANSIT_FILE_TTL_SECONDS` to a minimum of 60
 seconds and `OOMOL_CONNECT_TRANSIT_FILE_MAX_BYTES` to a maximum of 25 MiB.
 
+## Hidden Public Surface
+
+Set `OOMOL_CONNECT_PUBLIC_EXPOSURE=hidden` to conceal the Worker's public surface: only
+`GET /oauth/callback` stays anonymously reachable (the provider redirects the user's
+browser there with no token), and every other request without a valid token gets a bare,
+branding-free `404` that never falls through to static assets.
+
+The gate accepts the `OOMOL_CONNECT_ADMIN_TOKEN` and `OOMOL_CONNECT_RUNTIME_TOKEN`
+environment tokens as well as stored persistent runtime tokens (`oct_…`). Persistent
+tokens are verified with one indexed D1 lookup on `runtime_tokens.token_hash`, cached
+per isolate for 60 seconds, so revocation lags by up to the TTL. The app layer still
+enforces the token's full policy (actions, proxies, connection grants) on every
+request. D1 outages fail closed without caching the outage.
+
 ## Response Compression
 
 Cloudflare negotiates and applies response compression on egress, so the Worker leaves compression

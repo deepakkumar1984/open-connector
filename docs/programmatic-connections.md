@@ -81,8 +81,12 @@ continues. Repeated callbacks do not overwrite terminal results.
 
 OAuth inputs can include:
 
-- `returnUri`: optional `http:`, `https:`, or `oomol:` URL. The callback adds `status` and `service`,
-  and safe `code` and `message` fields on failure.
+- `returnUri`: optional `http:`, `https:`, or `oomol:` URL. The callback adds `status`, `service`,
+  and `connectionRequestId`, plus `appId` on success and safe `code` and `message` fields on failure.
+- `connectionName`: optional local alias for the new connection. It must start with a letter or
+  digit, contain only letters, digits, underscores, or hyphens, and be at most 64 characters;
+  invalid values return `invalid_connection_name`. When omitted, the runtime assigns a random
+  alias. Reconnection keeps the stored connection's name.
 - `authorizationOptionIds`: provider-declared option IDs. GitHub and Slack expose selectable
   provider-native scopes in their OAuth definitions. Required options are always included.
   Omission preserves the configured scopes; unknown options or options on unsupported providers
@@ -107,8 +111,9 @@ Reconnection takes the same OAuth body and returns a new request ID. Success kee
 `appId`. If the original connection is deleted or its credentials change during authorization,
 the stale callback fails instead of recreating it or overwriting the replacement.
 
-New connections receive distinct local aliases. Use the returned `alias` as the connection
-selector when executing actions. Existing local default-connection selection remains available.
+New connections receive distinct local aliases unless the request supplies `connectionName`.
+Use the returned `alias` as the connection selector when executing actions. Existing local
+default-connection selection remains available.
 
 ## API keys and custom credentials
 
@@ -120,18 +125,18 @@ POST /v1/connections/:service/connect/api-key
 POST /v1/connections/by-id/:appId/connect/api-key
 ```
 
-Body: `{ "apiKey": "...", "extra": { "field": "value" }, "comment": "Optional note" }`.
-`extra` and `comment` are optional.
+Body: `{ "apiKey": "...", "extra": { "field": "value" }, "comment": "Optional note", "connectionName": "Optional alias" }`.
+`extra`, `comment`, and `connectionName` are optional.
 
 ```http
 POST /v1/connections/:service/connect/custom-credential
 POST /v1/connections/by-id/:appId/connect/custom-credential
 ```
 
-Body: `{ "values": { "field": "value" }, "comment": "Optional note" }`.
-`comment` is optional; use `null` to clear an existing note. Replacement retains the connection
-ID, requires the existing credential type, and does not discard existing credentials when
-validation fails or a concurrent update wins.
+Body: `{ "values": { "field": "value" }, "comment": "Optional note", "connectionName": "Optional alias" }`.
+`comment` and `connectionName` are optional; use `null` to clear an existing note. Replacement
+retains the connection ID, requires the existing credential type, and does not discard existing
+credentials when validation fails or a concurrent update wins.
 
 The OpenAPI document at `/openapi.json` describes the request and response envelopes. The local
 console's `/api/connections` and `/api/oauth/authorizations` endpoints continue to work.

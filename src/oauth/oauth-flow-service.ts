@@ -1,6 +1,7 @@
 import type { StoredConnection, ConnectionService } from "../connection-service.ts";
 import type { OAuth2AuthDefinition } from "../core/types.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
+import type { ConnectionEventDispatcher } from "../server/connection-events.ts";
 import type { ISecretCodec } from "../server/secrets/secret-codec-core.ts";
 import type {
   ConnectionRequestStore,
@@ -15,7 +16,7 @@ import type {
 import type { OAuthTokenResult } from "./oauth-token.ts";
 
 import { createHash, randomBytes } from "node:crypto";
-import { ConnectionError } from "../connection-service.ts";
+import { ConnectionError, normalizeConnectionName } from "../connection-service.ts";
 import { providerFetch } from "../providers/provider-runtime.ts";
 import { requestAuthorizationCodeToken } from "./oauth-token.ts";
 
@@ -60,6 +61,7 @@ export interface OAuthFlowServiceOptions {
   providerLoader: IProviderLoader;
   states: IOAuthStateStore;
   requests: ConnectionRequestStore;
+  events?: ConnectionEventDispatcher;
   stateMaxAgeMs?: number;
   secretCodec?: ISecretCodec;
   isCustomClientConfigAllowed?: (service: string) => boolean;
@@ -84,6 +86,7 @@ export class OAuthFlowService {
   private readonly providerLoader: IProviderLoader;
   private readonly states: IOAuthStateStore;
   private readonly requests: ConnectionRequestStore;
+  private readonly events?: ConnectionEventDispatcher;
   private readonly stateMaxAgeMs: number;
   private readonly secretCodec?: ISecretCodec;
   private readonly isCustomClientConfigAllowed: (service: string) => boolean;
@@ -94,6 +97,7 @@ export class OAuthFlowService {
     this.providerLoader = input.providerLoader;
     this.states = input.states;
     this.requests = input.requests;
+    this.events = input.events;
     this.stateMaxAgeMs = input.stateMaxAgeMs ?? 15 * 60 * 1000;
     this.secretCodec = input.secretCodec;
     this.isCustomClientConfigAllowed = input.isCustomClientConfigAllowed ?? (() => false);
@@ -133,7 +137,9 @@ export class OAuthFlowService {
       extra: { ...configured.extra, ...input.extra },
       secretExtra: { ...configured.secretExtra, ...input.secretExtra },
     });
-    const connectionName = input.target?.connectionName ?? crypto.randomUUID();
+    const connectionName =
+      input.target?.connectionName ??
+      (input.connectionName === undefined ? crypto.randomUUID() : normalizeConnectionName(input.connectionName));
     const { pending, authorizationUrl } = await this.prepareAuthorization(
       {
         service: input.service,
@@ -168,17 +174,21 @@ export class OAuthFlowService {
   async rejectAuthorization(state: string, denied: boolean): Promise<string | undefined> {
     const pending = await this.requests.claim(state);
     if (!pending) return undefined;
-    await this.requests.fail(
-      pending.connectionRequestId,
-      denied ? "invalid_input" : "provider_error",
-      denied ? "Authorization was denied." : "OAuth connection failed.",
-    );
-    return callbackReturnUri(
-      pending,
-      "error",
-      denied ? "invalid_input" : "provider_error",
-      denied ? "Authorization was denied." : "OAuth connection failed.",
-    );
+    const code = denied ? "invalid_input" : "provider_error";
+    const message = denied ? "Authorization was denied." : "OAuth connection failed.";
+    await this.requests.fail(pending.connectionRequestId, code, message);
+    await this.events?.dispatch({
+      type: "connection.failed",
+      data: {
+        connectionRequestId: pending.connectionRequestId,
+        service: pending.service,
+        connectionName: pending.connectionName,
+        owner: pending.owner,
+        errorCode: code,
+        errorMessage: message,
+      },
+    });
+    return callbackReturnUri(pending, "error", code, message);
   }
 
   private async prepareAuthorization(
@@ -320,6 +330,7 @@ export class OAuthFlowService {
         },
       };
 
+      let appId: string | undefined;
       if (request) {
         const credential = await this.connections.prepareOAuthCredential(
           pending.service,
@@ -331,7 +342,7 @@ export class OAuthFlowService {
         if (missing.length)
           throw new OAuthFlowError("scope_missing", "The provider did not grant required OAuth scopes.");
         input.signal?.throwIfAborted();
-        const appId = await this.requests.complete(request, credential, input.signal);
+        appId = await this.requests.complete(request, credential, input.signal);
         if (!appId) {
           if (request.target) {
             try {
@@ -344,6 +355,16 @@ export class OAuthFlowService {
           }
           throw new OAuthFlowError("request_key_conflict", "The connection changed during authorization.");
         }
+        await this.events?.dispatch({
+          type: "connection.connected",
+          data: {
+            connectionRequestId: request.connectionRequestId,
+            service: request.service,
+            connectionName: request.connectionName,
+            owner: request.owner,
+            appId,
+          },
+        });
       } else {
         await this.connections.setOAuthCredential(
           pending.service,
@@ -355,7 +376,9 @@ export class OAuthFlowService {
       return {
         service: pending.service,
         connected: true,
-        ...(request?.returnUri ? { returnUri: callbackReturnUri(request, "success") } : {}),
+        ...(request?.returnUri
+          ? { returnUri: callbackReturnUri(request, "success", undefined, undefined, appId) }
+          : {}),
       };
     } catch (error) {
       if (request) {
@@ -366,6 +389,17 @@ export class OAuthFlowService {
             : "provider_error";
         const message = "OAuth connection failed.";
         await this.requests.fail(request.connectionRequestId, code, message);
+        await this.events?.dispatch({
+          type: "connection.failed",
+          data: {
+            connectionRequestId: request.connectionRequestId,
+            service: request.service,
+            connectionName: request.connectionName,
+            owner: request.owner,
+            errorCode: code,
+            errorMessage: message,
+          },
+        });
         throw new OAuthCallbackError(code, message, callbackReturnUri(request, "error", code, message), error);
       }
       throw error;
@@ -474,6 +508,7 @@ export interface OAuthConnectionRequestInput {
   authorizationOptionIds?: string[];
   extra?: Record<string, unknown>;
   secretExtra?: Record<string, string>;
+  connectionName?: string;
 }
 
 export interface OAuthConnectionRequestStart {
@@ -511,11 +546,14 @@ function callbackReturnUri(
   status: "success" | "error",
   code?: string,
   message?: string,
+  appId?: string,
 ): string | undefined {
   if (!pending.returnUri) return undefined;
   const url = new URL(pending.returnUri);
   url.searchParams.set("status", status);
   url.searchParams.set("service", pending.service);
+  url.searchParams.set("connectionRequestId", pending.connectionRequestId);
+  if (appId) url.searchParams.set("appId", appId);
   if (code) url.searchParams.set("code", code);
   if (message) url.searchParams.set("message", message);
   return url.toString();

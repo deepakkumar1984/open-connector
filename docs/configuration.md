@@ -39,6 +39,8 @@ OpenConnector is configured with environment variables.
 | `OOMOL_CONNECT_S3_SECRET_ACCESS_KEY`        | SDK credential chain      | Explicit S3 secret access key. Configure it with the access key ID, or omit both.                                                                                           |
 | `OOMOL_CONNECT_S3_SESSION_TOKEN`            | unset                     | Optional session token used with explicit S3 credentials.                                                                                                                   |
 | `OOMOL_CONNECT_RUN_LIMIT`                   | `5000`                    | Maximum number of recent action run audit records to retain.                                                                                                                |
+| `OOMOL_CONNECT_WEBHOOK_URL`                 | unset                     | HTTPS endpoint receiving `connection.connected` / `connection.failed` events. Unset disables delivery.                                                                      |
+| `OOMOL_CONNECT_WEBHOOK_SECRET`              | unset                     | HMAC-SHA256 secret signing webhook bodies (`x-oomol-connect-signature`). Unset sends `sha256=unsigned`.                                                                     |
 | `OOMOL_CONNECT_CATALOG_LAZY_SCHEMAS`        | `false`                   | Read action JSON schemas from the catalog files on demand instead of keeping them in memory. See below.                                                                     |
 | `OOMOL_CONNECT_CATALOG_SCHEMA_CACHE_FILES`  | `64`                      | Provider files whose action schemas stay cached when lazy schemas are on.                                                                                                   |
 
@@ -132,6 +134,40 @@ before exposing those surfaces.
 OpenConnector acts only as a resource server. It does not implement OIDC discovery or login, accept
 ID tokens as API credentials, or map JWT claims to action and proxy policy. JWT verification is
 currently available only on the Node server, not Cloudflare Workers.
+
+## Connection lifecycle webhooks
+
+Set `OOMOL_CONNECT_WEBHOOK_URL` to push OAuth connection-request outcomes to an API consumer,
+so it can stop polling `GET /connection-requests/:id`:
+
+- `connection.connected` — the callback completed and stored a connection (`appId`).
+- `connection.failed` — authorization was denied or the token exchange failed (`errorCode`,
+  `errorMessage`).
+
+Event payloads carry identifiers only — never credentials or tokens:
+
+```json
+{
+  "id": "evt_01J...",
+  "type": "connection.connected",
+  "occurredAt": "2026-01-01T00:00:00.000Z",
+  "data": {
+    "connectionRequestId": "req_01J...",
+    "service": "github",
+    "connectionName": "u_alice__work",
+    "owner": "local-admin",
+    "appId": "app_01J..."
+  }
+}
+```
+
+Deliveries are `POST`s with `content-type: application/json` plus `x-oomol-connect-event`,
+`x-oomol-connect-delivery` (the event id), and `x-oomol-connect-signature`
+(`sha256=<hex HMAC-SHA256 of the raw body>` under `OOMOL_CONNECT_WEBHOOK_SECRET`).
+Delivery is best-effort with a 5 s timeout: failures only log, so consumers must keep
+polling as the fallback and treat deliveries as at-least-once (dedupe on terminal request
+state). Superseded requests (a newer authorization replaced them) and derived states
+(`expired`, `reauth_required`) emit no event; polling covers those.
 
 ## S3-compatible transit files
 

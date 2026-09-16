@@ -1,9 +1,11 @@
 import type { CloudflareEnv } from "./cloudflare-env.ts";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { hashRuntimeToken } from "../storage/runtime-token-service.ts";
 import {
   createConcealmentResponse,
   hasValidServiceToken,
+  hasValidServiceTokenAsync,
   isAnonymousPublicAllowed,
   shouldHidePublicSurface,
 } from "./public-exposure-gate.ts";
@@ -15,6 +17,26 @@ const env = (overrides: Partial<CloudflareEnv> = {}): CloudflareEnv =>
     OOMOL_CONNECT_RUNTIME_TOKEN: "stage-zero-runtime-token",
     ...overrides,
   }) as CloudflareEnv;
+
+const requestWithToken = (token?: string): Request =>
+  new Request("https://connector.example.test/v1/health", {
+    headers: token ? { authorization: `Bearer ${token}` } : {},
+  });
+
+/** Minimal D1 stub counting token-hash lookups. */
+function stubDb(options: { foundHashes?: Set<string>; fail?: boolean; counter?: { count: number } }) {
+  return {
+    prepare: (_query: string) => ({
+      bind: (hash: string) => ({
+        first: async () => {
+          if (options.counter) options.counter.count += 1;
+          if (options.fail) throw new Error("d1 unavailable");
+          return options.foundHashes?.has(hash) ? { id: "tok-1" } : null;
+        },
+      }),
+    }),
+  };
+}
 
 describe("public exposure gate", () => {
   it("is opt-in and only hides the hidden profile", () => {
@@ -56,5 +78,73 @@ describe("public exposure gate", () => {
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(response.headers.get("content-type")).toBe("text/plain; charset=utf-8");
     expect(await response.text()).toBe("Not Found");
+  });
+});
+
+describe("persistent runtime tokens at the gate", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("accepts env service tokens without touching D1", async () => {
+    const counter = { count: 0 };
+    const workerEnv = env({ DB: stubDb({ counter }) as never });
+    for (const token of ["stage-zero-admin-token", "stage-zero-runtime-token"]) {
+      expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(true);
+    }
+    expect(counter.count).toBe(0);
+  });
+
+  it("accepts stored persistent tokens and caches the verdict per isolate", async () => {
+    const token = `oct_${crypto.randomUUID().replace(/-/g, "")}-accept`;
+    const counter = { count: 0 };
+    const workerEnv = env({
+      DB: stubDb({ foundHashes: new Set([hashRuntimeToken(token)]), counter }) as never,
+    });
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(true);
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(true);
+    expect(counter.count).toBe(1);
+  });
+
+  it("rejects unknown persistent tokens without repeated lookups", async () => {
+    const token = `oct_${crypto.randomUUID().replace(/-/g, "")}-unknown`;
+    const counter = { count: 0 };
+    const workerEnv = env({ DB: stubDb({ foundHashes: new Set(), counter }) as never });
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(false);
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(false);
+    expect(counter.count).toBe(1);
+  });
+
+  it("skips D1 for non-runtime-token bearers", async () => {
+    const counter = { count: 0 };
+    const workerEnv = env({ DB: stubDb({ counter }) as never });
+    expect(await hasValidServiceTokenAsync(requestWithToken("not-a-runtime-token"), workerEnv)).toBe(false);
+    expect(await hasValidServiceTokenAsync(requestWithToken(), workerEnv)).toBe(false);
+    expect(counter.count).toBe(0);
+  });
+
+  it("fails closed when D1 errors, without caching the outage", async () => {
+    const token = `oct_${crypto.randomUUID().replace(/-/g, "")}-outage`;
+    const counter = { count: 0 };
+    const failing = env({ DB: stubDb({ fail: true, counter }) as never });
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), failing)).toBe(false);
+    const recovered = env({
+      DB: stubDb({ foundHashes: new Set([hashRuntimeToken(token)]), counter }) as never,
+    });
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), recovered)).toBe(true);
+    expect(counter.count).toBe(2);
+  });
+
+  it("re-checks revoked tokens after the cache TTL", async () => {
+    vi.useFakeTimers();
+    const token = `oct_${crypto.randomUUID().replace(/-/g, "")}-revoke`;
+    const foundHashes = new Set([hashRuntimeToken(token)]);
+    const workerEnv = env({ DB: stubDb({ foundHashes }) as never });
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(true);
+    foundHashes.clear();
+    // Still cached: documented revocation lag.
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(true);
+    await vi.advanceTimersByTimeAsync(61_000);
+    expect(await hasValidServiceTokenAsync(requestWithToken(token), workerEnv)).toBe(false);
   });
 });

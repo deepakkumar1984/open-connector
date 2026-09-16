@@ -1,5 +1,6 @@
 import type { CredentialValidators, ProviderDefinition } from "../../core/types.ts";
 import type { ProviderOAuthRuntime } from "../../oauth/oauth-token.ts";
+import type { ConnectionEvent, ConnectionEventDispatcher } from "../connection-events.ts";
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCatalogStore } from "../../catalog-store.ts";
@@ -9,6 +10,7 @@ import { ProviderLoader } from "../../providers/provider-loader.ts";
 import { provider as slackProvider } from "../../providers/slack/definition.ts";
 import { slackCredentialValidators } from "../../providers/slack/runtime.ts";
 import { createConnectApp } from "../connect-app.ts";
+import { createConnectionEventDispatcher } from "../connection-events.ts";
 import { TransitFileService } from "../files/transit-files.ts";
 import { PlainTextSecretCodec } from "../secrets/secret-codec-core.ts";
 import { SqliteRuntimeDatabase } from "../storage/sqlite-runtime-store.ts";
@@ -46,6 +48,7 @@ async function setup(
   auth: { adminToken?: string; runtimeToken?: string } = {},
   definition: ProviderDefinition = provider,
   credentialValidators?: CredentialValidators,
+  connectionEvents?: ConnectionEventDispatcher,
 ) {
   const database = new SqliteRuntimeDatabase(":memory:");
   databases.push(database);
@@ -78,6 +81,7 @@ async function setup(
     }),
     publicOrigin: "http://localhost",
     secretCodec: new PlainTextSecretCodec(),
+    connectionEvents,
     ...auth,
   });
   const call = async (path: string, body?: unknown, token = auth.adminToken) =>
@@ -245,7 +249,15 @@ it("returns to the caller with success and safe failure parameters", async () =>
   const response = await call(`/oauth/callback?state=${success.stateHandle}&code=code`);
   expect(response.status).toBe(302);
   const successUrl = new URL(response.headers.get("location")!);
-  expect(Object.fromEntries(successUrl.searchParams)).toEqual({ keep: "1", status: "success", service: "example" });
+  const connected = (await (await call(`/v1/connection-requests/${success.connectionRequestId}`)).json()).data;
+  expect(connected.status).toBe("connected");
+  expect(Object.fromEntries(successUrl.searchParams)).toEqual({
+    keep: "1",
+    status: "success",
+    service: "example",
+    connectionRequestId: success.connectionRequestId,
+    appId: connected.appId,
+  });
   const denied = await create();
   const failure = await call(
     `/oauth/callback?state=${denied.stateHandle}&error=access_denied&error_description=secret`,
@@ -254,6 +266,8 @@ it("returns to the caller with success and safe failure parameters", async () =>
   const failureUrl = new URL(failure.headers.get("location")!);
   expect(failureUrl.searchParams.get("status")).toBe("error");
   expect(failureUrl.searchParams.get("code")).toBe("invalid_input");
+  expect(failureUrl.searchParams.get("connectionRequestId")).toBe(denied.connectionRequestId);
+  expect(failureUrl.searchParams.has("appId")).toBe(false);
   expect(failureUrl.toString()).not.toContain("secret");
   expect((await call("/v1/connections/example/connect", { returnUri: "javascript:alert(1)" })).status).toBe(400);
 });
@@ -408,4 +422,151 @@ it("connects Slack using granted scopes from the nested user token response", as
   const connection = (await (await call(`/v1/connections/by-id/${result.appId}`)).json()).data;
   expect(connection.scopes).toEqual(["channels:read", "users:read"]);
   expect(fetcher).toHaveBeenCalledTimes(2);
+});
+
+it("uses a caller-chosen connection name for credential connections and rejects invalid names", async () => {
+  const { call } = await setup();
+  const created = (
+    await (
+      await call("/v1/connections/example/connect/api-key", {
+        apiKey: "secret",
+        connectionName: "u_abc123__work",
+      })
+    ).json()
+  ).data;
+  expect(created.alias).toBe("u_abc123__work");
+  const detail = (await (await call(`/v1/connections/by-id/${created.id}`)).json()).data;
+  expect(detail).toMatchObject({ id: created.id, alias: "u_abc123__work" });
+  const custom = (
+    await (
+      await call("/v1/connections/example/connect/custom-credential", {
+        values: { password: "secret" },
+        connectionName: "u_abc123__custom",
+      })
+    ).json()
+  ).data;
+  expect(custom.alias).toBe("u_abc123__custom");
+  const invalid = await call("/v1/connections/example/connect/api-key", {
+    apiKey: "secret",
+    connectionName: "not a name!",
+  });
+  expect(invalid.status).toBe(400);
+  expect((await invalid.json()).errorCode).toBe("invalid_connection_name");
+});
+
+it("uses a caller-chosen connection name for OAuth connections", async () => {
+  const { call, database } = await setup();
+  const request = (await (await call("/v1/connections/example/connect", { connectionName: "u_abc123__oauth" })).json())
+    .data;
+  expect(request.status).toBe("initiated");
+  expect((await call(`/oauth/callback?state=${request.stateHandle}&code=code`)).status).toBe(200);
+  const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
+  expect(result).toMatchObject({ status: "connected", appId: expect.any(String) });
+  expect((await database.connectionStore.list())[0]).toMatchObject({
+    id: result.appId,
+    connectionName: "u_abc123__oauth",
+  });
+  const detail = (await (await call(`/v1/connections/by-id/${result.appId}`)).json()).data;
+  expect(detail.alias).toBe("u_abc123__oauth");
+  const invalid = await call("/v1/connections/example/connect", { connectionName: "not a name!" });
+  expect(invalid.status).toBe(400);
+  expect((await invalid.json()).errorCode).toBe("invalid_connection_name");
+});
+
+describe("connection lifecycle events", () => {
+  function captureEvents() {
+    const bodies: string[] = [];
+    const headers: Record<string, string>[] = [];
+    const fetchImpl = vi.fn(async (_url: string | URL | Request, init?: RequestInit) => {
+      bodies.push(init?.body as string);
+      headers.push({ ...(init?.headers as Record<string, string>) });
+      return new Response("{}", { status: 200 });
+    });
+    const events = createConnectionEventDispatcher({
+      url: "https://bots.example.com/api/connectors/events",
+      secret: "webhook-secret",
+      fetchImpl: fetchImpl as unknown as typeof fetch,
+    });
+    return { events, bodies, headers };
+  }
+
+  it("pushes connection.connected with identifiers only", async () => {
+    const captured = captureEvents();
+    const { call } = await setup(undefined, {}, provider, undefined, captured.events);
+    const request = (await (await call("/v1/connections/example/connect", { connectionName: "u_alice__work" })).json())
+      .data;
+    expect(await call(`/oauth/callback?state=${request.stateHandle}&code=code`)).toBeTruthy();
+    const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
+    expect(result.status).toBe("connected");
+
+    expect(captured.bodies).toHaveLength(1);
+    const event = JSON.parse(captured.bodies[0]!) as ConnectionEvent;
+    expect(event).toMatchObject({
+      type: "connection.connected",
+      data: {
+        connectionRequestId: request.connectionRequestId,
+        service: "example",
+        connectionName: "u_alice__work",
+        owner: "local-admin",
+        appId: result.appId,
+      },
+    });
+    expect(captured.bodies[0]).not.toContain("access-secret");
+    expect(captured.headers[0]?.["x-oomol-connect-event"]).toBe("connection.connected");
+    expect(captured.headers[0]?.["x-oomol-connect-signature"]).toMatch(/^sha256=[0-9a-f]{64}$/);
+    expect(captured.headers[0]?.["x-oomol-connect-delivery"]).toBe(event.id);
+  });
+
+  it("pushes connection.failed when authorization is denied", async () => {
+    const captured = captureEvents();
+    const { call } = await setup(undefined, {}, provider, undefined, captured.events);
+    const request = (await (await call("/v1/connections/example/connect", { connectionName: "u_alice__work" })).json())
+      .data;
+    await call(`/oauth/callback?state=${request.stateHandle}&error=access_denied&error_description=nope`);
+
+    expect(captured.bodies).toHaveLength(1);
+    expect(JSON.parse(captured.bodies[0]!)).toMatchObject({
+      type: "connection.failed",
+      data: {
+        connectionRequestId: request.connectionRequestId,
+        service: "example",
+        connectionName: "u_alice__work",
+        errorCode: "invalid_input",
+        errorMessage: "Authorization was denied.",
+      },
+    });
+  });
+
+  it("pushes connection.failed when the token exchange fails", async () => {
+    const captured = captureEvents();
+    const { call } = await setup(
+      async () => {
+        throw new Error("provider down");
+      },
+      {},
+      provider,
+      undefined,
+      captured.events,
+    );
+    const request = (await (await call("/v1/connections/example/connect", {})).json()).data;
+    await call(`/oauth/callback?state=${request.stateHandle}&code=code`);
+
+    expect(captured.bodies).toHaveLength(1);
+    expect(JSON.parse(captured.bodies[0]!)).toMatchObject({
+      type: "connection.failed",
+      data: {
+        connectionRequestId: request.connectionRequestId,
+        errorCode: "provider_error",
+        errorMessage: "OAuth connection failed.",
+      },
+    });
+  });
+
+  it("sends nothing without a dispatcher", async () => {
+    const { call } = await setup();
+    const request = (await (await call("/v1/connections/example/connect", {})).json()).data;
+    expect((await call(`/oauth/callback?state=${request.stateHandle}&code=code`)).status).toBe(200);
+    const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
+    expect(result.status).toBe("connected");
+  });
 });

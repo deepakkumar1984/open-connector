@@ -1,5 +1,7 @@
 import type { CloudflareEnv } from "./cloudflare-env.ts";
 
+import { hashRuntimeToken } from "../storage/runtime-token-service.ts";
+
 /**
  * Opt-in gate that conceals the public surface of the Worker.
  *
@@ -45,6 +47,51 @@ export function hasValidServiceToken(request: Request, env: CloudflareEnv): bool
   }
 
   return false;
+}
+
+/**
+ * Persistent runtime tokens (`oct_…`) also pass the gate: the hash lookup is
+ * one indexed D1 read, cached per isolate for 60s. Revocation therefore lags
+ * by up to the TTL — the app layer still enforces the token's full policy on
+ * every request. D1 outages fail closed without caching the outage.
+ */
+const persistentTokenPrefix = "oct_";
+const persistentTokenCacheTtlMs = 60_000;
+const persistentTokenCacheMaxEntries = 1000;
+const persistentTokenCache = new Map<string, { ok: boolean; expiresAt: number }>();
+
+export async function hasValidServiceTokenAsync(request: Request, env: CloudflareEnv): Promise<boolean> {
+  if (hasValidServiceToken(request, env)) {
+    return true;
+  }
+
+  const token = readBearerToken(request);
+  if (!token || !token.startsWith(persistentTokenPrefix) || !env.DB) {
+    return false;
+  }
+
+  const hash = hashRuntimeToken(token);
+  const now = Date.now();
+  const cached = persistentTokenCache.get(hash);
+  if (cached && cached.expiresAt > now) {
+    return cached.ok;
+  }
+
+  let ok: boolean;
+  try {
+    const row = await env.DB.prepare("select id from runtime_tokens where token_hash = ?").bind(hash).first();
+    ok = row != null;
+  } catch {
+    return false;
+  }
+  if (persistentTokenCache.size >= persistentTokenCacheMaxEntries) {
+    for (const [key, entry] of persistentTokenCache) {
+      if (entry.expiresAt <= now) persistentTokenCache.delete(key);
+    }
+    if (persistentTokenCache.size >= persistentTokenCacheMaxEntries) persistentTokenCache.clear();
+  }
+  persistentTokenCache.set(hash, { ok, expiresAt: now + persistentTokenCacheTtlMs });
+  return ok;
 }
 
 export function createConcealmentResponse(): Response {

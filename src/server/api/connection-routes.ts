@@ -81,8 +81,7 @@ export function createConnectionRoutes({ connections, oauthFlow }: ConnectionRou
           throw new ConnectionError("unsupported_auth_type", "The connection uses a different credential type.");
         }
         const service = target?.service ?? context.req.param("service")!;
-        const options = {
-          connectionName: target?.connectionName ?? crypto.randomUUID(),
+        const baseOptions = {
           expectedConnection: target,
           signal: context.req.raw.signal,
         };
@@ -90,14 +89,16 @@ export function createConnectionRoutes({ connections, oauthFlow }: ConnectionRou
         if (authType === "api-key") {
           const input = parseBody(apiKeyConnectionInput, body);
           summary = await connections.connectWithApiKey(service, {
-            ...options,
+            ...baseOptions,
+            connectionName: target?.connectionName ?? input.connectionName ?? crypto.randomUUID(),
             values: { ...input.extra, apiKey: input.apiKey },
             comment: input.comment,
           });
         } else {
           const input = parseBody(customConnectionInput, body);
           summary = await connections.connectWithCustomCredential(service, {
-            ...options,
+            ...baseOptions,
+            connectionName: target?.connectionName ?? input.connectionName ?? crypto.randomUUID(),
             values: input.values,
             comment: input.comment,
           });

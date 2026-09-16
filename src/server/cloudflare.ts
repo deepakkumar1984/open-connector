@@ -20,12 +20,13 @@ import { loadCatalogFromAssets } from "./cloudflare/catalog-assets.ts";
 import { readPositiveInteger, resolvePublicOrigin } from "./cloudflare/cloudflare-env.ts";
 import {
   createConcealmentResponse,
-  hasValidServiceToken,
+  hasValidServiceTokenAsync,
   isAnonymousPublicAllowed,
   shouldHidePublicSurface,
 } from "./cloudflare/public-exposure-gate.ts";
 import { createConnectApp } from "./connect-app.ts";
 import { preloadOptionalServerModules } from "./connect-server.ts";
+import { resolveConnectionEventDispatcher } from "./connection-events.ts";
 import { KVTransitFileService } from "./files/kv-transit-files.ts";
 import { R2TransitFileService } from "./files/r2-transit-files.ts";
 import { createWorkerSecretCodec } from "./secrets/worker-secret-codec.ts";
@@ -48,7 +49,7 @@ export default {
 
     if (shouldHidePublicSurface(env)) {
       const { pathname } = new URL(request.url);
-      if (!isAnonymousPublicAllowed(request.method, pathname) && !hasValidServiceToken(request, env)) {
+      if (!isAnonymousPublicAllowed(request.method, pathname) && !(await hasValidServiceTokenAsync(request, env))) {
         return createConcealmentResponse();
       }
     }
@@ -75,6 +76,11 @@ async function createCloudflareApp(env: CloudflareEnv, publicOrigin: string): Pr
   const secretCodec = await createSecretCodec(env.OOMOL_CONNECT_ENCRYPTION_KEY);
   return await createConnectApp({
     catalog: await loadCatalogOnce(assets),
+    connectionEvents: resolveConnectionEventDispatcher({
+      url: env.OOMOL_CONNECT_WEBHOOK_URL,
+      secret: env.OOMOL_CONNECT_WEBHOOK_SECRET,
+      logger: workerLogger,
+    }),
     providerLoader: new ProviderLoader(executorModules),
     runtimeDatabase: new D1RuntimeDatabase(env.DB, {
       secretCodec,
@@ -167,6 +173,8 @@ function createCacheKey(env: CloudflareEnv, publicOrigin: string): string {
     transitFileTtlSeconds: env.OOMOL_CONNECT_TRANSIT_FILE_TTL_SECONDS ?? "",
     transitFileMaxBytes: env.OOMOL_CONNECT_TRANSIT_FILE_MAX_BYTES ?? "",
     runLimit: env.OOMOL_CONNECT_RUN_LIMIT ?? "",
+    webhookUrl: env.OOMOL_CONNECT_WEBHOOK_URL ?? "",
+    webhookSecret: env.OOMOL_CONNECT_WEBHOOK_SECRET ? "set" : "",
   });
 }
 

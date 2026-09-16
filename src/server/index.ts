@@ -18,6 +18,7 @@ import { executorModules } from "../providers/registry.generated.ts";
 import { createRuntimeJwtVerifier } from "./api/runtime-jwt.ts";
 import { registerStaticRoutes } from "./api/static-routes.ts";
 import { createConnectApp } from "./connect-app.ts";
+import { resolveConnectionEventDispatcher } from "./connection-events.ts";
 import { cleanupStagedTransitFiles, createNodeTransitFileUpload } from "./files/node-transit-file-upload.ts";
 import { TransitFileService } from "./files/transit-files.ts";
 import { logger } from "./logger.ts";
@@ -144,8 +145,14 @@ async function main(): Promise<void> {
     await transitFiles.cleanupExpired();
     await cleanupStagedTransitFiles(transitFileTempDir, transitFileTtlSeconds * 1000);
 
+    const connectionEvents = resolveConnectionEventDispatcher({
+      url: process.env.OOMOL_CONNECT_WEBHOOK_URL,
+      secret: process.env.OOMOL_CONNECT_WEBHOOK_SECRET,
+      logger,
+    });
     const { app, runtimeAuthConfigured } = await createConnectApp({
       catalog,
+      connectionEvents,
       providerLoader: new ProviderLoader(executorModules),
       runtimeDatabase,
       transitFiles,
