@@ -28,6 +28,7 @@ const provider: ProviderDefinition = {
       service: "example",
       name: "echo",
       description: "Echo the input.",
+      operationType: "write",
       requiredScopes: [],
       providerPermissions: [],
       inputSchema: { type: "object", additionalProperties: true },
@@ -96,6 +97,17 @@ describe("action execution OpenAPI", () => {
     expect(documentedStatuses("/v1/proxy/{service}")).toContain("413");
   });
 
+  it("documents the provider setup route as an administrator route", () => {
+    const document = createOpenApiDocument([provider]);
+    const setup = document.paths["/v1/providers/{service}/setup"] as {
+      get: { tags: string[]; description: string; responses: Record<string, unknown> };
+    };
+
+    expect(setup.get.tags).toEqual(["Connections"]);
+    expect(setup.get.description).toContain("administrator");
+    expect(Object.keys(setup.get.responses).sort()).toEqual(["200", "401", "403", "404"]);
+  });
+
   it("documents public /v1 catalog routes with the runtime envelope", () => {
     const document = createOpenApiDocument([provider]);
     const search = document.paths["/v1/actions/search"] as {
@@ -111,7 +123,6 @@ describe("action execution OpenAPI", () => {
       required: string[];
       properties: { alias?: { description?: string }; marketplace?: { required?: string[] } };
     };
-
     const health = document.paths["/v1/health"] as {
       get: {
         responses: Record<

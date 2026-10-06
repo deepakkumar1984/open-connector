@@ -1,18 +1,19 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { IntegrationDefinition } from "../../triggers/common/integration.ts";
+import type { PollDefinition } from "../../triggers/common/poll.ts";
 import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 
 import { randomUUID } from "node:crypto";
 import { requiredRawString, requiredString } from "../../core/cast.ts";
 import { readBoundedResponseBytes } from "../../core/request.ts";
-import { googleJsonRequest, googleRequest } from "../google-runtime.ts";
 import {
-  defineOAuthProviderExecutors,
   defineProviderProxy,
   providerProxyEndpointPrefixes,
   ProviderRequestError,
   providerResponseError,
 } from "../provider-runtime.ts";
+import { defineGoogleProviderExecutors, googleBearerProxyAuth, googleServiceAccountValidator } from "./runtime-auth.ts";
 import {
   createComment,
   createPermission,
@@ -38,6 +39,7 @@ import {
   updatePermission,
   updateReply,
 } from "./runtime-collaboration.ts";
+import { googleJsonRequest, googleRequest } from "./runtime-request.ts";
 import {
   asObject,
   asOptionalObject,
@@ -57,6 +59,9 @@ import {
   resolveRequiredString,
   resolveSupportsAllDrives,
 } from "./runtime-shared.ts";
+import { googledriveOAuthScopes } from "./scopes.ts";
+import { googleDriveChanges, googleDriveChangeListener } from "./trigger-changes.ts";
+import { googleDriveFileChange } from "./trigger-on-file-change.ts";
 
 const service = "googledrive";
 
@@ -76,6 +81,17 @@ const driveFileFields = [
   "shared",
   "starred",
   "trashed",
+  // Whether THIS caller may manage the file's sharing, computed per-user by
+  // Drive itself. A consumer that mirrors a file's access list needs to know
+  // this before it tries: `permissions.list` answers 403 wherever the caller
+  // holds no sharing right, and without the projection the only way to find
+  // out is to make the call on every file and read the failures.
+  //
+  // Projected narrowly rather than as the whole `capabilities` object, which
+  // carries ~35 booleans this provider has no use for. Drive returns exactly
+  // the requested members, so the shape is `{ canShare }`.
+  "ownedByMe",
+  "capabilities(canShare)",
 ].join(",");
 const driveFields = [
   "id",
@@ -229,20 +245,22 @@ const googledriveActionHandlers: ProviderActionHandlers<"googledrive", ActionHan
   },
 };
 
-export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, googledriveActionHandlers);
+export const executors: ProviderExecutors = defineGoogleProviderExecutors(service, googledriveActionHandlers, {
+  scopes: googledriveOAuthScopes,
+});
 
 export const credentialValidators: CredentialValidators = {
   async oauth2(input, { fetcher, signal }) {
     const profile = await googleJsonRequest<{
-      emailAddress?: string;
       user?: { emailAddress?: string; displayName?: string };
     }>(`${driveApiBaseUrl}/about`, {
       accessToken: input.accessToken,
       fetcher,
       signal,
-      query: { fields: "user,emailAddress" },
+      // About has no top-level `emailAddress`, and Drive rejects the whole selection when any listed field is unknown.
+      query: { fields: "user" },
     });
-    const emailAddress = profile.user?.emailAddress ?? profile.emailAddress;
+    const emailAddress = profile.user?.emailAddress;
     const displayName = profile.user?.displayName ?? emailAddress;
     return {
       profile: {
@@ -254,6 +272,7 @@ export const credentialValidators: CredentialValidators = {
       },
     };
   },
+  customCredential: googleServiceAccountValidator(service, googledriveOAuthScopes),
 };
 
 async function createDrive(input: Record<string, unknown>, accessToken: string, fetcher: typeof fetch) {
@@ -817,6 +836,13 @@ function normalizeDriveFile(payload: Record<string, unknown>) {
     ...(typeof payload.shared === "boolean" ? { shared: payload.shared } : {}),
     ...(typeof payload.starred === "boolean" ? { starred: payload.starred } : {}),
     ...(typeof payload.trashed === "boolean" ? { trashed: payload.trashed } : {}),
+    ...(typeof payload.ownedByMe === "boolean" ? { ownedByMe: payload.ownedByMe } : {}),
+    // Present only when Drive answered it. Omitted rather than defaulted to
+    // `false`, because "Drive did not say" and "the caller may not share" lead
+    // a consumer to opposite actions, and a default would make them the same.
+    ...(typeof asOptionalObject(payload.capabilities)?.canShare === "boolean"
+      ? { capabilities: { canShare: asOptionalObject(payload.capabilities)!.canShare as boolean } }
+      : {}),
   };
 }
 
@@ -1040,6 +1066,12 @@ function normalizeApproval(payload: Record<string, unknown>) {
 export const proxy: ProviderProxyExecutor = defineProviderProxy({
   service,
   baseUrl: "https://www.googleapis.com",
-  auth: { type: "oauth_bearer" },
+  auth: googleBearerProxyAuth(googledriveOAuthScopes),
   allowedEndpoint: providerProxyEndpointPrefixes("/drive/v3", "/upload/drive/v3"),
 });
+
+export const triggers: readonly (IntegrationDefinition | PollDefinition)[] = [
+  googleDriveChanges,
+  googleDriveChangeListener,
+  googleDriveFileChange,
+];

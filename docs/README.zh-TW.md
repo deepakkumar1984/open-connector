@@ -5,6 +5,7 @@
 [English](../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Français](README.fr.md) | [Español](README.es.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../LICENSE.txt)
+[![npm](https://img.shields.io/npm/v/@oomol-lab/open-connector.svg)](https://www.npmjs.com/package/@oomol-lab/open-connector)
 ![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933)
 ![Cloudflare compatible](https://img.shields.io/badge/Cloudflare-compatible-F38020)
 ![MCP](https://img.shields.io/badge/MCP-ready-111827)
@@ -27,7 +28,7 @@ OpenConnector 是一套供 AI Agent 使用的開放原始碼連接器閘道，�
   <tr>
     <td width="33.33%" valign="top">代管 OAuth 與執行階段，開箱即用。無須部署或設定 OAuth 應用程式。</td>
     <td width="33.33%" valign="top">使用 Docker 或 Node.js 在本機或自己的基礎架構中執行。儲存空間與 OAuth 應用程式由你負責管理。</td>
-    <td width="33.33%" valign="top"><strong>Cloudflare</strong>、<strong>Fly.io</strong>、<strong>RepoCloud</strong>、<strong>nibrun</strong> 等。</td>
+    <td width="33.33%" valign="top"><strong>Cloudflare</strong>、<strong>Fly.io</strong>、<strong>RepoCloud</strong>、<strong>nibrun</strong>、<strong>NEXUS AI</strong> 等。</td>
   </tr>
   <tr>
     <td width="33.33%" align="center">🚀 <a href="https://oomol.com/docs/connector-saas/"><strong>OOMOL 代管</strong></a></td>

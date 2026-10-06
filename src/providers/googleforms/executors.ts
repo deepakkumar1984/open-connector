@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-runtime.ts";
-import type { OAuthProviderContext } from "../provider-runtime.ts";
+import type { OAuthProviderContext, ProviderActionHandlers } from "../provider-runtime.ts";
 
 import {
   compactObject,
@@ -9,14 +8,23 @@ import {
   optionalInteger,
   optionalRecord,
   optionalString,
+  requiredRawString,
+  requiredString,
 } from "../../core/cast.ts";
-import { googleJsonRequest } from "../google-runtime.ts";
 import {
-  defineOAuthProviderExecutors,
+  defineGoogleProviderExecutors,
+  googleBearerProxyAuth,
+  googleServiceAccountValidator,
+} from "../googledrive/runtime-auth.ts";
+import { googleJsonRequest } from "../googledrive/runtime-request.ts";
+import {
   defineProviderProxy,
   providerInputError,
   ProviderRequestError,
+  providerResponseError,
+  requiredResponseRecord,
 } from "../provider-runtime.ts";
+import { googleFormsOAuthScopes } from "./scopes.ts";
 
 export const googleFormsApiBaseUrl = "https://forms.googleapis.com/v1/forms";
 
@@ -92,12 +100,14 @@ export const googleFormsActionHandlers: ProviderActionHandlers<"googleforms", Go
   list_watches: listWatches,
 };
 
-export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, googleFormsActionHandlers);
+export const executors: ProviderExecutors = defineGoogleProviderExecutors(service, googleFormsActionHandlers, {
+  scopes: googleFormsOAuthScopes,
+});
 
 export const proxy: ProviderProxyExecutor = defineProviderProxy({
   service,
   baseUrl: googleFormsApiBaseUrl,
-  auth: { type: "oauth_bearer" },
+  auth: googleBearerProxyAuth(googleFormsOAuthScopes),
   skipDnsValidation: true,
 });
 
@@ -122,6 +132,7 @@ export const credentialValidators: CredentialValidators = {
       },
     };
   },
+  customCredential: googleServiceAccountValidator(service, googleFormsOAuthScopes),
 };
 
 async function createForm(input: Record<string, unknown>, context: GoogleFormsRuntimeContext) {
@@ -333,12 +344,12 @@ function normalizeFormSummary(
     description?: string;
   },
 ): Record<string, unknown> {
-  const info = optionalRecord(payload.info);
+  const info = requiredResponseRecord(payload.info, "googleforms form info");
   const publishSettings = normalizePublishSettings(payload.publishSettings);
 
   return compactObject({
-    formId: requireString(payload.formId, "missing googleforms formId"),
-    title: requireString(info?.title, "missing googleforms form title"),
+    formId: requiredString(payload.formId, "googleforms formId", providerResponseError),
+    title: requiredRawString(info.title ?? "", "googleforms form title", providerResponseError),
     description: overrides?.description ?? optionalString(info?.description),
     documentTitle: optionalString(info?.documentTitle),
     revisionId: optionalString(payload.revisionId),
@@ -350,12 +361,12 @@ function normalizeFormSummary(
 }
 
 function normalizeFormDetail(payload: FormPayload): Record<string, unknown> {
-  const info = optionalRecord(payload.info);
+  const info = requiredResponseRecord(payload.info, "googleforms form info");
   const settings = normalizeSettings(payload.settings);
   const publishSettings = normalizePublishSettings(payload.publishSettings);
   return compactObject({
-    formId: requireString(payload.formId, "missing googleforms formId"),
-    title: requireString(info?.title, "missing googleforms form title"),
+    formId: requiredString(payload.formId, "googleforms formId", providerResponseError),
+    title: requiredRawString(info.title ?? "", "googleforms form title", providerResponseError),
     description: optionalString(info?.description),
     documentTitle: optionalString(info?.documentTitle),
     revisionId: optionalString(payload.revisionId),

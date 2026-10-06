@@ -1,3 +1,4 @@
+import type { ProviderDispatchContext, ProviderHttpDispatchOptions } from "../core/provider-http-dispatch.ts";
 import type {
   ActionExecutor,
   ExecutionContext,
@@ -23,6 +24,11 @@ import {
   requiredString,
 } from "../core/cast.ts";
 import { createGuardedFetch } from "../core/guarded-fetch.ts";
+import {
+  dispatchProviderHttpAttempt,
+  ProviderHttpDispatchError,
+  runWithProviderHttpDispatch,
+} from "../core/provider-http-dispatch.ts";
 import { readBoundedResponseBytes } from "../core/request.ts";
 
 /**
@@ -53,6 +59,14 @@ export interface ProviderFetchOptions {
  */
 export function createProviderFetch(options: ProviderFetchOptions = {}): ProviderFetch {
   return createGuardedFetch({
+    dispatchAttempt: async (attempt, signal, transport, revalidate) => {
+      try {
+        return await dispatchProviderHttpAttempt(attempt, signal, transport, revalidate);
+      } catch (error) {
+        if (error instanceof ProviderHttpDispatchError) throw new ProviderDispatchRequestError(error.retryAfterSeconds);
+        throw error;
+      }
+    },
     fetch: options.fetch,
     allowPrivateNetwork: options.allowPrivateNetwork,
     skipDnsValidation: options.skipDnsValidation,
@@ -77,6 +91,20 @@ export function createProviderFetch(options: ProviderFetchOptions = {}): Provide
  * the native fetch is always invoked without a stray receiver.
  */
 export const providerFetch: ProviderFetch = createProviderFetch();
+
+/** Preserve admission denials at the shared runtime boundary despite provider-specific error mapping. */
+export async function withProviderHttpDispatchResult<T>(
+  context: ProviderDispatchContext,
+  run: () => T | Promise<T>,
+  options?: ProviderHttpDispatchOptions,
+): Promise<T> {
+  try {
+    return await runWithProviderHttpDispatch(context, run, options);
+  } catch (error) {
+    if (error instanceof ProviderHttpDispatchError) throw new ProviderDispatchRequestError(error.retryAfterSeconds);
+    throw error;
+  }
+}
 
 /**
  * Default User-Agent sent by local provider executors.
@@ -274,6 +302,13 @@ export class ProviderRequestError extends Error {
   }
 }
 
+/** A dispatch denial is retryable and must not be wrapped as a bad provider credential. */
+export class ProviderDispatchRequestError extends ProviderRequestError {
+  constructor(retryAfterSeconds?: number) {
+    super(429, "Provider HTTP dispatch is temporarily unavailable.", { retryAfterSeconds }, "rate_limited");
+  }
+}
+
 /**
  * Return the 400 error providers throw for invalid action input or credentials.
  * The message is surfaced verbatim as the `invalid_input` execution error.
@@ -336,6 +371,20 @@ export interface ProviderProxyCredentialHeader {
   optional?: boolean;
 }
 
+export interface ProviderProxyBearerResolverInput {
+  context: ExecutionContext;
+  service: string;
+  /** Guarded fetch used for provider-owned auxiliary requests such as token minting. */
+  fetcher: typeof fetch;
+  /** Caller signal from the proxy request context; aborts in-flight token minting. */
+  signal?: AbortSignal;
+}
+
+export interface ProviderProxyBearerResolution {
+  accessToken: string;
+  tokenType?: string;
+}
+
 export type ProviderProxyAuth =
   | { type: "none" }
   | { type: "bearer" }
@@ -351,7 +400,12 @@ export type ProviderProxyAuth =
   | { type: "api_key_basic"; suffix?: string }
   | { type: "api_key_authorization"; prefix: string; suffix?: string }
   | { type: "custom_credential_header"; field: string; name: string; prefix?: string }
-  | { type: "credential_headers"; headers: readonly ProviderProxyCredentialHeader[] };
+  | { type: "credential_headers"; headers: readonly ProviderProxyCredentialHeader[] }
+  | {
+      /** Resolve a bearer token for providers that mint one from a stored credential at request time. */
+      type: "bearer_resolver";
+      resolve(input: ProviderProxyBearerResolverInput): Promise<ProviderProxyBearerResolution>;
+    };
 
 export type ProviderProxyBaseUrlResolver = (context: ExecutionContext, service: string) => Promise<string> | string;
 export type ProviderProxyBaseUrl = string | ProviderProxyBaseUrlResolver;
@@ -376,6 +430,8 @@ export interface ProviderProxyDefinition {
   auth: ProviderProxyAuth;
   allowedEndpoint?: (endpoint: string) => boolean;
   customizeRequest?: (input: ProviderProxyRequestCustomizationInput) => Promise<void> | void;
+  /** Parse a failed HTTP response using the same provider error rules as actions. */
+  readError?: (response: Response) => Promise<ProviderRequestError>;
   /** Provider-specific credential/signature headers that redirects must not forward cross-origin. */
   sensitiveHeaders?: readonly string[];
   /** Exact code-controlled origins that `customizeRequest` may select in addition to the resolved base origin. */
@@ -400,7 +456,7 @@ const blockedProxyRequestHeaders = new Set([
   "transfer-encoding",
 ]);
 const defaultProviderProxyMaxResponseBytes = 20 * 1024 * 1024;
-const defaultProviderJsonMaxResponseBytes = 20 * 1024 * 1024;
+export const defaultProviderJsonMaxResponseBytes: number = 20 * 1024 * 1024;
 const defaultProviderErrorMaxResponseBytes = 64 * 1024;
 const defaultProviderRequestTimeoutMs = 30_000;
 
@@ -558,6 +614,11 @@ export async function readProviderProxyResponse(
 }
 
 export async function readProviderProxyErrorMessage(response: Response, fallbackMessage: string): Promise<string> {
+  // An unfollowed redirect's body usually echoes its `Location`, which may carry a signed target URL.
+  if (response.status >= 300 && response.status < 400) {
+    await response.body?.cancel().catch(() => undefined);
+    return fallbackMessage;
+  }
   const bytes = await readBoundedResponseBytes(response, {
     maxBytes: defaultProviderProxyMaxResponseBytes,
     fieldName: "proxy error response",
@@ -622,7 +683,15 @@ export function defineProviderProxy(input: ProviderProxyDefinition): ProviderPro
       const providerOrigin = url.origin;
       const headers = normalizeProviderProxyHeaders(proxyInput.headers);
       headers.set("user-agent", providerUserAgent);
-      const authResult = await applyProviderProxyAuth(input, context, url, headers, proxyInput.method, proxyInput.body);
+      const authResult = await applyProviderProxyAuth(
+        input,
+        context,
+        url,
+        headers,
+        proxyInput.method,
+        proxyInput.body,
+        egressFetch,
+      );
       let requestBody = authResult.body;
       await input.customizeRequest?.({
         context,
@@ -659,6 +728,10 @@ export function defineProviderProxy(input: ProviderProxyDefinition): ProviderPro
 
         const response = await egressFetch(url, init);
         if (!response.ok) {
+          // A provider error parser would surface an unfollowed redirect's body; the shared reader withholds it.
+          if (input.readError && (response.status < 300 || response.status >= 400)) {
+            throw await input.readError(response);
+          }
           throw new ProviderRequestError(
             response.status,
             await readProviderProxyErrorMessage(response, `provider request failed with HTTP ${response.status}`),
@@ -729,6 +802,7 @@ async function applyProviderProxyAuth(
   headers: Headers,
   method: string,
   body: unknown,
+  egressFetch: typeof fetch,
 ): Promise<ProviderProxyAuthResult> {
   switch (input.auth.type) {
     case "none":
@@ -742,6 +816,16 @@ async function applyProviderProxyAuth(
       const credential = await requireOAuthCredential(context, input.service);
       headers.set("authorization", `${credential.tokenType} ${credential.accessToken}`);
       return { credential, body };
+    }
+    case "bearer_resolver": {
+      const resolved = await input.auth.resolve({
+        context,
+        service: input.service,
+        fetcher: egressFetch,
+        signal: context.signal,
+      });
+      headers.set("authorization", `${resolved.tokenType ?? "Bearer"} ${resolved.accessToken}`);
+      return { credential: undefined, body };
     }
     case "oauth_query": {
       const credential = await requireOAuthCredential(context, input.service);
@@ -1027,6 +1111,59 @@ export async function readProviderErrorTextBody(response: Response, fieldName: s
   }
 }
 
+// The three HTTP-date forms of RFC 9110 section 5.6.7. Date.parse alone is too
+// lenient for a header: V8 reads "wait 5" as 1 May 2001, and reads the zone-less
+// asctime form as local time although every HTTP-date is UTC.
+const imfFixdatePattern =
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun), \d{2} (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{4} \d{2}:\d{2}:\d{2} GMT$/;
+const rfc850DatePattern =
+  /^(?:Mon|Tues|Wednes|Thurs|Fri|Satur|Sun)day, \d{2}-(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{2} \d{2}:\d{2}:\d{2} GMT$/;
+const asctimeDatePattern =
+  /^(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) (?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d{2}:\d{2}:\d{2} \d{4}$/;
+
+/**
+ * Read a `Retry-After` header as whole seconds from now: an integer delay
+ * verbatim, an HTTP-date as the seconds until that instant (never negative).
+ * Examples: `"73" => 73`; a date 90 s ahead `=> 90`; absent or unparseable
+ * `=> undefined`.
+ */
+export function readRetryAfterSeconds(headers: Headers, now: number = Date.now()): number | undefined {
+  const value = headers.get("retry-after")?.trim();
+  if (!value) {
+    return undefined;
+  }
+  if (/^\d+$/.test(value)) {
+    const seconds = Number(value);
+    return Number.isSafeInteger(seconds) ? seconds : undefined;
+  }
+  const retryAt =
+    imfFixdatePattern.test(value) || rfc850DatePattern.test(value)
+      ? Date.parse(value)
+      : asctimeDatePattern.test(value)
+        ? Date.parse(`${value} GMT`)
+        : Number.NaN;
+  return Number.isFinite(retryAt) ? Math.max(0, Math.ceil((retryAt - now) / 1000)) : undefined;
+}
+
+/**
+ * Attach a rate-limited response's `Retry-After` to its error details in the
+ * shape Slack established, `details.retryAfterSeconds`, so every provider's
+ * 429 (and 503) reaches the action envelope with the same pacing hint.
+ * Other statuses, and responses without a usable header, return `details`
+ * untouched; non-record details are kept under `body`.
+ */
+export function withRetryAfterSeconds(response: Response, details?: unknown): unknown {
+  if (response.status !== 429 && response.status !== 503) {
+    return details;
+  }
+  const retryAfterSeconds = readRetryAfterSeconds(response.headers);
+  if (retryAfterSeconds === undefined) {
+    return details;
+  }
+  const record = optionalRecord(details) ?? (details == null ? {} : { body: details });
+  return { ...record, retryAfterSeconds };
+}
+
 /**
  * Read a JSON provider response or raise a structured provider request error.
  */
@@ -1196,7 +1333,8 @@ export function toProviderExecutionError(error: unknown, fallbackMessage: string
             ? "authorization_failed"
             : error.status === 429
               ? "rate_limited"
-              : error.status < 500
+              : // A 3xx is an upstream redirect that `redirect: "manual"` surfaced unfollowed, not bad input.
+                error.status < 500 && (error.status < 300 || error.status >= 400)
                 ? "invalid_input"
                 : "provider_error"),
         message: error.message,

@@ -5,6 +5,7 @@
 [English](../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Français](README.fr.md) | [Español](README.es.md)
 
 [![License: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../LICENSE.txt)
+[![npm](https://img.shields.io/npm/v/@oomol-lab/open-connector.svg)](https://www.npmjs.com/package/@oomol-lab/open-connector)
 ![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933)
 ![Cloudflare compatible](https://img.shields.io/badge/Cloudflare-compatible-F38020)
 ![MCP](https://img.shields.io/badge/MCP-ready-111827)
@@ -28,7 +29,7 @@ Agent 和应用。
   <tr>
     <td width="33.33%" valign="top">托管 OAuth 和 runtime，开箱即用。无需部署或配置 OAuth 应用。</td>
     <td width="33.33%" valign="top">使用 Docker 或 Node.js 在本地或自己的基础设施中运行。存储和 OAuth 应用由你负责管理。</td>
-    <td width="33.33%" valign="top"><strong>Cloudflare</strong>、<strong>Fly.io</strong>、<strong>RepoCloud</strong>、<strong>nibrun</strong> 等。</td>
+    <td width="33.33%" valign="top"><strong>Cloudflare</strong>、<strong>Fly.io</strong>、<strong>RepoCloud</strong>、<strong>nibrun</strong>、<strong>NEXUS AI</strong> 等。</td>
   </tr>
   <tr>
     <td width="33.33%" align="center">🚀 <a href="https://oomol.com/docs/connector-saas/"><strong>OOMOL 托管</strong></a></td>
@@ -200,6 +201,7 @@ OpenConnector 与 [Wanta](https://github.com/oomol-lab/wanta) 是 OOMOL 开源�
 
 - [快速开始](quickstart.md)
 - [开发者工具](sdk-cli.md)
+- [客户端接入：MCP、CLI 和 SDK](client-onboarding.zh-CN.md)
 - [Gmail OAuth 和 SDK 接入教程](gmail-oauth-sdk.zh-CN.md)
 - [Runtime API 和 MCP](runtime-api.md)
 - [部署方案](deployment-options/README.zh-CN.md)

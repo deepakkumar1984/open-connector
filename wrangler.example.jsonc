@@ -17,6 +17,7 @@
     // SPA by the platform BEFORE the Worker ran — bypassing the gate entirely.
     "run_worker_first": true,
   },
+  "triggers": { "crons": ["* * * * *"] },
   "observability": {
     "enabled": true,
     "logs": {

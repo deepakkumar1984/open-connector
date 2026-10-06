@@ -10,14 +10,15 @@ import {
   optionalString,
   requiredRecord,
 } from "../../core/cast.ts";
-import { googleJsonRequest } from "../google-runtime.ts";
 import {
-  defineOAuthProviderExecutors,
-  defineProviderProxy,
-  providerProxyEndpointPrefixes,
-  ProviderRequestError,
-} from "../provider-runtime.ts";
+  defineGoogleProviderExecutors,
+  googleBearerProxyAuth,
+  googleServiceAccountValidator,
+} from "../googledrive/runtime-auth.ts";
+import { googleJsonRequest } from "../googledrive/runtime-request.ts";
+import { defineProviderProxy, providerProxyEndpointPrefixes, ProviderRequestError } from "../provider-runtime.ts";
 import { googleMeetApiBaseUrl, googleMeetApiOrigin, googleMeetUserInfoUrl } from "./constants.ts";
+import { googleMeetOAuthScopes } from "./scopes.ts";
 
 const service = "googlemeet";
 
@@ -158,12 +159,14 @@ export const googleMeetActionHandlers: ProviderActionHandlers<"googlemeet", Goog
   get_smart_note: getSmartNote,
 };
 
-export const executors: ProviderExecutors = defineOAuthProviderExecutors(service, googleMeetActionHandlers);
+export const executors: ProviderExecutors = defineGoogleProviderExecutors(service, googleMeetActionHandlers, {
+  scopes: googleMeetOAuthScopes,
+});
 
 export const proxy: ProviderProxyExecutor = defineProviderProxy({
   service,
   baseUrl: googleMeetApiOrigin,
-  auth: { type: "oauth_bearer" },
+  auth: googleBearerProxyAuth(googleMeetOAuthScopes),
   allowedEndpoint: providerProxyEndpointPrefixes("/v2"),
 });
 
@@ -189,6 +192,7 @@ export const credentialValidators: CredentialValidators = {
       },
     };
   },
+  customCredential: googleServiceAccountValidator(service, googleMeetOAuthScopes),
 };
 
 async function createSpace(input: Record<string, unknown>, context: GoogleMeetRuntimeContext): Promise<unknown> {

@@ -1,4 +1,6 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
+import type { IntegrationDefinition } from "../../triggers/common/integration.ts";
+import type { PollDefinition } from "../../triggers/common/poll.ts";
 import type { ProviderActionHandlers } from "../provider-runtime.ts";
 import type { OAuthProviderContext } from "../provider-runtime.ts";
 
@@ -11,11 +13,11 @@ import {
   requiredRecord,
 } from "../../core/cast.ts";
 import {
-  combineProviderActionHandlers,
-  defineOAuthProviderExecutors,
-  defineProviderProxy,
-  ProviderRequestError,
-} from "../provider-runtime.ts";
+  defineGoogleProviderExecutors,
+  googleBearerProxyAuth,
+  googleServiceAccountValidator,
+} from "../googledrive/runtime-auth.ts";
+import { combineProviderActionHandlers, defineProviderProxy, ProviderRequestError } from "../provider-runtime.ts";
 import { googlecalendarEventActionHandlers } from "./runtime-events.ts";
 import {
   googlecalendarApiBaseUrl,
@@ -25,6 +27,8 @@ import {
   resolveRuleId,
   resolveSettingId,
 } from "./runtime-shared.ts";
+import { googlecalendarOAuthScopes } from "./scopes.ts";
+import { googleCalendarEventChanged } from "./trigger-on-event-changed.ts";
 
 type GooglecalendarRuntimeDeps = OAuthProviderContext;
 
@@ -156,15 +160,18 @@ export const googlecalendarActionHandlers: ProviderActionHandlers<"googlecalenda
     googlecalendarEventActionHandlers,
   );
 
-export const executors: ProviderExecutors = defineOAuthProviderExecutors(
+export const executors: ProviderExecutors = defineGoogleProviderExecutors(
   "googlecalendar",
   googlecalendarActionHandlers,
+  {
+    scopes: googlecalendarOAuthScopes,
+  },
 );
 
 export const proxy: ProviderProxyExecutor = defineProviderProxy({
   service: "googlecalendar",
   baseUrl: googlecalendarApiBaseUrl,
-  auth: { type: "oauth_bearer" },
+  auth: googleBearerProxyAuth(googlecalendarOAuthScopes),
   skipDnsValidation: true,
 });
 
@@ -190,6 +197,7 @@ export const credentialValidators: CredentialValidators = {
       },
     };
   },
+  customCredential: googleServiceAccountValidator("googlecalendar", googlecalendarOAuthScopes),
 };
 
 async function listCalendars(input: Record<string, unknown>, { accessToken, fetcher }: GooglecalendarRuntimeDeps) {
@@ -730,3 +738,5 @@ function asRecord<T>(value: unknown) {
 
   return value as Record<string, T | undefined>;
 }
+
+export const triggers: readonly (IntegrationDefinition | PollDefinition)[] = [googleCalendarEventChanged];

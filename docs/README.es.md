@@ -5,6 +5,7 @@
 [English](../README.md) | [简体中文](README.zh-CN.md) | [繁體中文](README.zh-TW.md) | [日本語](README.ja.md) | [한국어](README.ko.md) | [Русский](README.ru.md) | [Français](README.fr.md) | [Español](README.es.md)
 
 [![Licencia: Apache-2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](../LICENSE.txt)
+[![npm](https://img.shields.io/npm/v/@oomol-lab/open-connector.svg)](https://www.npmjs.com/package/@oomol-lab/open-connector)
 ![Node.js 22+](https://img.shields.io/badge/Node.js-22%2B-339933)
 ![Compatible con Cloudflare](https://img.shields.io/badge/Cloudflare-compatible-F38020)
 ![MCP](https://img.shields.io/badge/MCP-ready-111827)
@@ -28,7 +29,7 @@ un catálogo compartido de más de 1000 proveedores y más de 10 000 acciones pr
   <tr>
     <td width="33.33%" valign="top">OAuth gestionado y entorno de ejecución alojado, listos para usar. Sin despliegues ni configuración de aplicaciones OAuth.</td>
     <td width="33.33%" valign="top">Ejecuta OpenConnector en local o en tu propia infraestructura con Docker o Node.js. Tú gestionas el almacenamiento y las aplicaciones OAuth.</td>
-    <td width="33.33%" valign="top"><strong>Cloudflare</strong>, <strong>Fly.io</strong>, <strong>RepoCloud</strong>, <strong>nibrun</strong> y más.</td>
+    <td width="33.33%" valign="top"><strong>Cloudflare</strong>, <strong>Fly.io</strong>, <strong>RepoCloud</strong>, <strong>nibrun</strong>, <strong>NEXUS AI</strong> y más.</td>
   </tr>
   <tr>
     <td width="33.33%" align="center">🚀 <a href="https://oomol.com/docs/connector-saas/"><strong>Alojado en OOMOL</strong></a></td>

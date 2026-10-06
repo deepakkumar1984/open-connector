@@ -4,11 +4,14 @@ Managed provider actions can be configured through the [Connector Marketplace](m
 
 OpenConnector is configured with environment variables.
 
+Embedding hosts can also configure opt-in [provider HTTP dispatch hooks](provider-http-dispatch.md)
+through runtime options to admit, delay or deny each upstream HTTP attempt.
+
 | Variable                                    | Default                   | Purpose                                                                                                                                                                     |
 | ------------------------------------------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `PORT`                                      | `3000`                    | Local HTTP server port.                                                                                                                                                     |
 | `HOST`                                      | `127.0.0.1`               | Bind address. Docker image sets `0.0.0.0`.                                                                                                                                  |
-| `OOMOL_CONNECT_ORIGIN`                      | `http://localhost:<PORT>` | Public origin used for OAuth redirect URLs and Action guide request examples.                                                                                               |
+| `OOMOL_CONNECT_ORIGIN`                      | `http://localhost:<PORT>` | Public origin used for OAuth redirect URLs and Action guide request examples. A path in it is a mount prefix that every request must carry.                                 |
 | `OOMOL_CONNECT_DATA_DIR`                    | `./data`                  | SQLite database, local transit files, and Node upload staging. Docker uses `/app/data`.                                                                                     |
 | `OOMOL_CONNECT_DATABASE_URL`                | unset                     | PostgreSQL connection URL. When unset, the Node runtime uses SQLite under the data directory.                                                                               |
 | `OOMOL_CONNECT_DATABASE_POOL_MAX`           | `10`                      | Maximum PostgreSQL connections per Node runtime instance.                                                                                                                   |
@@ -25,6 +28,8 @@ OpenConnector is configured with environment variables.
 | `OOMOL_CONNECT_BLOCKED_ACTIONS`             | unset                     | Comma-separated executable action denylist. Supports `service.*` and `*`.                                                                                                   |
 | `OOMOL_CONNECT_ALLOWED_PROXIES`             | unset                     | Comma-separated provider proxy allowlist. Supports service names and `*`.                                                                                                   |
 | `OOMOL_CONNECT_BLOCKED_PROXIES`             | unset                     | Comma-separated provider proxy denylist. Supports service names and `*`.                                                                                                    |
+| `OOMOL_CONNECT_ALLOWED_TRIGGERS`            | unset                     | Comma-separated Trigger allowlist; exact IDs, `<service>.*`, or `*`.                                                                                                        |
+| `OOMOL_CONNECT_BLOCKED_TRIGGERS`            | unset                     | Comma-separated Trigger block rules; block rules override grants.                                                                                                           |
 | `OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK`       | `false`                   | Allow self-hosted provider connections to target private networks. See below.                                                                                               |
 | `OOMOL_CONNECT_EGRESS_TRUSTED_HOSTS`        | unset                     | Trusted hosts routed through a corporate VPN. See below.                                                                                                                    |
 | `OOMOL_CONNECT_LOG_LEVEL`                   | `info`                    | Pino log level for the local Node server.                                                                                                                                   |
@@ -331,3 +336,5 @@ Set secrets with Wrangler instead of committing them to config:
 npx wrangler secret put OOMOL_CONNECT_ADMIN_TOKEN --config wrangler.local.jsonc
 npx wrangler secret put OOMOL_CONNECT_ENCRYPTION_KEY --config wrangler.local.jsonc
 ```
+
+Persistent runtime tokens need explicit `allowedTriggers` grants for Provider Triggers; old and new tokens default to no Trigger access. Trigger grants do not require `allowedProxies`. Stateful subscriptions require a persistent runtime token; environment tokens and verified JWTs support only permitted `options` and `read`. See [Provider Triggers](runtime-api.md#provider-triggers) for lifecycle, cleanup, account recovery and token rotation. Workers must have scheduled maintenance enabled and catalog assets available when Trigger cleanup is pending.
