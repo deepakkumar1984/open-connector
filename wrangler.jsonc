@@ -1,0 +1,50 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "blazorly-connectors",
+  "main": "src/server/cloudflare.ts",
+  "compatibility_date": "2026-07-02",
+  "compatibility_flags": ["nodejs_compat"],
+  "cache": {
+    "enabled": true
+  },
+  "assets": {
+    "directory": "dist/web",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    // true (not the path array) so the public-exposure gate sees every request,
+    // including "/" — otherwise Static Assets serves the console SPA before the
+    // Worker runs and bypasses concealment.
+    "run_worker_first": true
+  },
+  "observability": {
+    "enabled": true,
+    "logs": {
+      "enabled": true,
+      "invocation_logs": true,
+      "persist": true
+    }
+  },
+  "vars": {
+    "OOMOL_CONNECT_ORIGIN": "https://connectors.blazorly.com",
+    "OOMOL_CONNECT_PUBLIC_EXPOSURE": "hidden"
+  },
+  // Local dev runs on :8788 so it doesn't clash with blazorly-agent's worker on :8787.
+  // blazorly-agent's .dev.vars sets CONNECTORS_URL=http://localhost:8788 to reach this.
+  "dev": {
+    "port": 8788
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "open-connector",
+      "database_id": "a40a6bd4-a506-4136-b465-c5453e2ff2b0",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "TRANSIT_FILES",
+      "bucket_name": "open-connector-transit-files"
+    }
+  ]
+}
