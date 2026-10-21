@@ -48,6 +48,7 @@ through runtime options to admit, delay or deny each upstream HTTP attempt.
 | `OOMOL_CONNECT_WEBHOOK_SECRET`              | unset                     | HMAC-SHA256 secret signing webhook bodies (`x-oomol-connect-signature`). Unset sends `sha256=unsigned`.                                                                     |
 | `OOMOL_CONNECT_CATALOG_LAZY_SCHEMAS`        | `false`                   | Read action JSON schemas from the catalog files on demand instead of keeping them in memory. See below.                                                                     |
 | `OOMOL_CONNECT_CATALOG_SCHEMA_CACHE_FILES`  | `64`                      | Provider files whose action schemas stay cached when lazy schemas are on.                                                                                                   |
+| `OOMOL_CONNECT_OAUTH_CLOSE_DELAY_SECONDS`   | `5`                       | Seconds the OAuth completion page waits before closing its window. `0` closes it as soon as it loads.                                                                       |
 
 Example:
 

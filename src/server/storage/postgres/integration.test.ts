@@ -97,6 +97,7 @@ describe.skipIf(!testPostgresUrl)("PostgreSQL runtime integration", () => {
   it("atomically consumes OAuth state across database instances", async () => {
     await first.oauthStateStore.set({
       service: "gmail",
+      retirementGeneration: await first.connectionStore.getRetirementGeneration("gmail", "default"),
       state: "state-1",
       createdAt: "2026-06-30T00:00:00.000Z",
     });

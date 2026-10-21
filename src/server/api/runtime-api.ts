@@ -282,25 +282,16 @@ export function mapConnectionErrorStatus(error: ConnectionError): 400 | 404 | 40
   if (error.code === "unknown_service" || error.code === "connection_not_found") {
     return 404;
   }
-  if (error.code === "oauth_token_expired" || error.code === "oauth_refresh_unavailable") {
+  if (
+    error.code === "oauth_token_expired" ||
+    error.code === "oauth_reauth_required" ||
+    error.code === "oauth_refresh_unavailable" ||
+    error.code === "oauth_token_refresh_failed"
+  ) {
     return 409;
   }
   return 400;
 }
-
-/**
- * The error codes a provider may put in `ProviderRequestError`'s `code`
- * argument. Every other code `mapExecutionErrorStatus` knows is raised by the
- * connection, policy or dispatch layer, and a provider that borrowed one would
- * answer with a status that has nothing to do with what its upstream said.
- */
-export const providerErrorCodes: readonly string[] = [
-  "authorization_failed",
-  "insufficient_credit",
-  "invalid_input",
-  "provider_error",
-  "rate_limited",
-];
 
 function mapExecutionErrorStatus(code: string | undefined, details?: unknown): RuntimeStatus {
   const upstreamStatus = optionalInteger(optionalRecord(details)?.status);
@@ -316,7 +307,12 @@ function mapExecutionErrorStatus(code: string | undefined, details?: unknown): R
   if (code === "internal_error" || code === "provider_error" || code === "executor_unavailable") {
     return 500;
   }
-  if (code === "oauth_token_expired" || code === "oauth_refresh_unavailable") {
+  if (
+    code === "oauth_token_expired" ||
+    code === "oauth_reauth_required" ||
+    code === "oauth_refresh_unavailable" ||
+    code === "oauth_token_refresh_failed"
+  ) {
     return 409;
   }
   if (code === "connection_not_found" || code === "unknown_service" || code === "unknown_action") {

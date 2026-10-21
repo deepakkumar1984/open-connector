@@ -9,6 +9,7 @@ import { defaultLazySchemaCacheFiles } from "../catalog-lazy-schemas.ts";
 import { parseActionPolicyList } from "../core/action-policy.ts";
 import { parseEgressTrustedHosts, parsePrivateNetworkAccessFlag } from "../core/request.ts";
 import { isConsoleShellRequest } from "./api/console-paths.ts";
+import { DEFAULT_OAUTH_CLOSE_DELAY_SECONDS } from "./api/oauth-completion-page.ts";
 import { registerStaticRoutes } from "./api/static-routes.ts";
 import { resolveConnectionEventDispatcher } from "./connection-events.ts";
 import { createConnectorRuntime } from "./connector-runtime.ts";
@@ -31,6 +32,10 @@ const runLimit = readPositiveIntegerEnv("OOMOL_CONNECT_RUN_LIMIT", DEFAULT_RUN_L
 const databaseUrl = optionalEnv("OOMOL_CONNECT_DATABASE_URL");
 const databasePoolMax = readPositiveIntegerEnv("OOMOL_CONNECT_DATABASE_POOL_MAX", 10);
 const databaseConnectTimeoutMs = readPositiveIntegerEnv("OOMOL_CONNECT_DATABASE_CONNECT_TIMEOUT_MS", 10_000);
+const oauthCloseDelaySeconds = readNonNegativeIntegerEnv(
+  "OOMOL_CONNECT_OAUTH_CLOSE_DELAY_SECONDS",
+  DEFAULT_OAUTH_CLOSE_DELAY_SECONDS,
+);
 
 // The standalone binary embeds migrations/postgresql, but the PostgreSQL startup validator refuses to serve until
 // they are applied and its error text points at `npm run runtime:migrate`, which a binary user does not have.
@@ -107,6 +112,7 @@ async function main(): Promise<void> {
       logger,
     }),
     apiReference: true,
+    oauthCloseDelaySeconds,
     logger,
   });
 
@@ -223,6 +229,16 @@ function readPositiveIntegerEnv(name: string, fallback: number): number {
 
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+function readNonNegativeIntegerEnv(name: string, fallback: number): number {
+  const value = optionalEnv(name);
+  if (value === undefined) {
+    return fallback;
+  }
+
+  const parsed = Number(value);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }
 
 function readTransitFileOptions(): ConnectorTransitFileOptions {

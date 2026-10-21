@@ -5,6 +5,7 @@ export interface CloudflareEnv {
   TRANSIT_FILES: R2BucketBinding | KVNamespaceBinding;
   TRANSIT_FILES_BACKEND?: "r2" | "kv"; // New: used to distinguish backend type at runtime
   ASSETS?: AssetsBinding;
+  OAUTH_KV?: KVNamespaceBinding;
   OOMOL_CONNECT_ORIGIN?: string;
   OOMOL_CONNECT_PUBLIC_EXPOSURE?: string;
   OOMOL_CONNECT_ADMIN_TOKEN?: string;
@@ -24,6 +25,7 @@ export interface CloudflareEnv {
   OOMOL_CONNECT_RUN_LIMIT?: string;
   OOMOL_CONNECT_WEBHOOK_URL?: string;
   OOMOL_CONNECT_WEBHOOK_SECRET?: string;
+  OOMOL_CONNECT_OAUTH_CLOSE_DELAY_SECONDS?: string;
 }
 
 export function resolvePublicOrigin(request: Request, env: CloudflareEnv): string {
@@ -33,4 +35,15 @@ export function resolvePublicOrigin(request: Request, env: CloudflareEnv): strin
 export function readPositiveInteger(value: string | undefined, fallback: number): number {
   const parsed = Number(value);
   return Number.isInteger(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+/** Reads a non-negative integer setting. Empty, negative, and non-integer values fall back, since `Number("")` is 0. */
+export function readNonNegativeInteger(value: string | undefined, fallback: number): number {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return fallback;
+  }
+
+  const parsed = Number(trimmed);
+  return Number.isInteger(parsed) && parsed >= 0 ? parsed : fallback;
 }

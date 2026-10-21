@@ -30,6 +30,44 @@ export interface FusionApiOperation {
 
 export const fusionApiOperations: FusionApiOperation[] = [
   {
+    actionName: "oomol_ocr_submit",
+    operationType: "write",
+    method: "POST",
+    path: "/v1/oomol-ocr/submit",
+    tag: "oomol-ocr",
+    description: "Recognize image text and suggest corrections for Chinese typos",
+    successStatuses: [200],
+    pathParams: [],
+    inputFields: [
+      {
+        name: "imageURL",
+        kind: "string",
+        required: true,
+        description: "Publicly accessible image URL.",
+        format: "uri",
+      },
+      {
+        name: "correct",
+        kind: "boolean",
+        required: false,
+        description: "Generate Chinese typo correction suggestions after text recognition.",
+        defaultValue: true,
+      },
+    ],
+  },
+  {
+    actionName: "oomol_ocr_result",
+    operationType: "read",
+    method: "GET",
+    path: "/v1/oomol-ocr/result/{sessionID}",
+    tag: "oomol-ocr",
+    description: "Get image text recognition and Chinese typo correction results",
+    successStatuses: [200, 202, 404],
+    pathParams: ["sessionID"],
+    inputFields: [{ name: "sessionID", kind: "string", required: true, description: "Session ID" }],
+  },
+
+  {
     actionName: "cphone_nano_banana_result",
     operationType: "read",
     method: "GET",
@@ -1210,7 +1248,8 @@ export const fusionApiOperations: FusionApiOperation[] = [
     method: "POST",
     path: "/v1/openai-image-async/submit",
     tag: "openai-image-async",
-    description: "Submit asynchronous OpenAI image generation requests, including gpt-image-2 image creation.",
+    description:
+      "Submit asynchronous OpenAI image generation requests, including gpt-image-2 and gpt-image-2.5 image creation.",
     successStatuses: [200],
     pathParams: [],
     inputFields: [
@@ -1224,7 +1263,7 @@ export const fusionApiOperations: FusionApiOperation[] = [
         name: "model",
         kind: "string",
         required: false,
-        description: "OpenAI image model name",
+        description: "OpenAI image model: gpt-image-2 or gpt-image-2.5. Defaults to gpt-image-2.",
       },
       {
         name: "background",
@@ -1283,7 +1322,7 @@ export const fusionApiOperations: FusionApiOperation[] = [
         kind: "string",
         required: false,
         description:
-          "Output image size. For GPT Image 2, use auto or WIDTHxHEIGHT. Official constraints: largest dimension <= 3840, width and height multiples of 16, longest side at most 3x the shortest side, and total pixels between 655360 and 8294400 inclusive.",
+          "Output image size. For GPT Image 2 and 2.5, use auto or WIDTHxHEIGHT. Official constraints: largest dimension <= 3840, width and height multiples of 16, longest side at most 3x the shortest side, and total pixels between 655360 and 8294400 inclusive.",
       },
       {
         name: "user",
@@ -1317,7 +1356,8 @@ export const fusionApiOperations: FusionApiOperation[] = [
     method: "POST",
     path: "/v1/openai-image-edit-async/submit",
     tag: "openai-image-edit-async",
-    description: "Submit asynchronous OpenAI image edit requests, including gpt-image-2 image editing.",
+    description:
+      "Submit asynchronous OpenAI image edit requests, including gpt-image-2 and gpt-image-2.5 image editing.",
     successStatuses: [200],
     pathParams: [],
     inputFields: [
@@ -1331,7 +1371,7 @@ export const fusionApiOperations: FusionApiOperation[] = [
         name: "model",
         kind: "string",
         required: false,
-        description: "OpenAI image model name",
+        description: "OpenAI image model: gpt-image-2 or gpt-image-2.5. Defaults to gpt-image-2.",
       },
       {
         name: "background",
@@ -1383,7 +1423,7 @@ export const fusionApiOperations: FusionApiOperation[] = [
         kind: "string",
         required: false,
         description:
-          "Output image size. For GPT Image 2, use auto or WIDTHxHEIGHT. Official constraints: largest dimension <= 3840, width and height multiples of 16, longest side at most 3x the shortest side, and total pixels between 655360 and 8294400 inclusive.",
+          "Output image size. For GPT Image 2 and 2.5, use auto or WIDTHxHEIGHT. Official constraints: largest dimension <= 3840, width and height multiples of 16, longest side at most 3x the shortest side, and total pixels between 655360 and 8294400 inclusive.",
       },
       {
         name: "user",
@@ -1395,13 +1435,15 @@ export const fusionApiOperations: FusionApiOperation[] = [
         name: "images",
         kind: "array",
         required: true,
-        description: "Reference images to edit or compose from",
+        description:
+          "Reference images to edit or compose from: 1 to 16 objects with image_url, a public HTTP(S) URL or base64 image data URL. Each image must be at most 10 MiB. file_id is not supported.",
       },
       {
         name: "mask",
         kind: "object",
         required: false,
-        description: "Mask image reference for partial edits",
+        description:
+          "Mask object with image_url, a public HTTP(S) URL or base64 image data URL, at most 10 MiB. file_id is not supported.",
       },
     ],
   },

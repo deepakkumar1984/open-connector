@@ -5,6 +5,7 @@ import type { RequestTransaction } from "./connection-request-store.ts";
 import type { RuntimeRow } from "./runtime-sql.ts";
 
 import { HttpRequestError } from "../api/http-utils.ts";
+import { initializeRetirement, lockRetirement, retirementMatches } from "./connection-retirement.ts";
 import { queueSaasConnections, readSaasConnection } from "./saas-project-store.ts";
 
 /** Connection writes share the request transaction so replacing/deleting remote references cannot lose cleanup work. */
@@ -45,17 +46,59 @@ export class SqlConnectionStore implements IConnectionStore {
     return Promise.all(rows.map((row) => this.read(row)));
   }
 
+  async getRetirementGeneration(service: string, connectionName: string): Promise<string> {
+    const [, [row]] = await this.transaction([
+      initializeRetirement(service, connectionName, crypto.randomUUID()),
+      {
+        sql: "select generation from connection_retirements where service = ? and connection_name = ?",
+        values: [service, connectionName],
+      },
+    ]);
+    return row.generation as string;
+  }
+
   async set(service: string, connectionName: string, credential: ResolvedCredential): Promise<StoredLocalConnection> {
+    const stored = await this.writeCredential(service, connectionName, credential);
+    if (!stored) throw new Error("Connection upsert did not return the stored row.");
+    return stored;
+  }
+
+  async setIfCurrentGeneration(
+    service: string,
+    connectionName: string,
+    credential: ResolvedCredential,
+    retirementGeneration: string,
+  ): Promise<StoredLocalConnection | undefined> {
+    return this.writeCredential(service, connectionName, credential, retirementGeneration);
+  }
+
+  private async writeCredential(
+    service: string,
+    connectionName: string,
+    credential: ResolvedCredential,
+    retirementGeneration?: string,
+  ): Promise<StoredLocalConnection | undefined> {
+    const fence =
+      retirementGeneration === undefined
+        ? { sql: "1 = 1", values: [] }
+        : retirementMatches(service, connectionName, retirementGeneration);
     const value = await this.codec.encode(JSON.stringify(credential));
-    const [, , [row]] = await this.transaction([
+    const [[accepted], , , [row]] = await this.transaction([
+      retirementGeneration === undefined
+        ? { sql: "select 1", values: [] }
+        : lockRetirement(service, connectionName, retirementGeneration),
       {
         sql: "update connections set revision = revision where service = ? and connection_name = ?",
         values: [service, connectionName],
       },
-      queueSaasConnections("service = ? and connection_name = ?", [service, connectionName]),
+      queueSaasConnections(`service = ? and connection_name = ? and ${fence.sql}`, [
+        service,
+        connectionName,
+        ...fence.values,
+      ]),
       {
         sql: `insert into connections (id, revision, service, connection_name, value, updated_at, provider_account_id)
-          values (?, ?, ?, ?, ?, ?, ?) on conflict (service, connection_name) do update set
+          select ?, ?, ?, ?, ?, ?, ? where ${fence.sql} on conflict (service, connection_name) do update set
           revision = excluded.revision, value = excluded.value, updated_at = excluded.updated_at,
           source = 'local', managed_project_id = null, provider_config_id = null, external_user_id = null,
           remote_account_id = null, local_request_id = null, provider_account_id = excluded.provider_account_id
@@ -71,9 +114,11 @@ export class SqlConnectionStore implements IConnectionStore {
           credential.authType !== "no_auth" && credential.metadata.providerAccountVerified === true
             ? credential.profile.accountId
             : null,
+          ...fence.values,
         ],
       },
     ]);
+    if (!accepted) return undefined;
     if (!row)
       throw new HttpRequestError(
         "connection_has_subscriptions",
@@ -114,7 +159,13 @@ export class SqlConnectionStore implements IConnectionStore {
   }
 
   async delete(service: string, connectionName: string): Promise<void> {
-    const [, , , [remaining]] = await this.transaction([
+    const retired = "not exists (select 1 from connections where service = ? and connection_name = ?)";
+    const results = await this.transaction([
+      initializeRetirement(service, connectionName, crypto.randomUUID()),
+      {
+        sql: "update connection_retirements set generation = generation where service = ? and connection_name = ?",
+        values: [service, connectionName],
+      },
       {
         sql: "update connections set revision = revision where service = ? and connection_name = ?",
         values: [service, connectionName],
@@ -126,11 +177,25 @@ export class SqlConnectionStore implements IConnectionStore {
         values: [service, connectionName],
       },
       {
+        sql: `update connection_retirements set generation = ? where service = ? and connection_name = ? and ${retired}`,
+        values: [crypto.randomUUID(), service, connectionName, service, connectionName],
+      },
+      {
+        sql: `delete from oauth_states where service = ? and connection_name = ? and ${retired}`,
+        values: [service, connectionName, service, connectionName],
+      },
+      {
+        sql: `update connection_requests set phase = 'completed', status = 'failed', error_code = 'connection_retired',
+          error_message = 'The connection was disconnected during authorization.', value = null, updated_at = ?
+          where kind = 'local' and service = ? and connection_name = ? and phase in ('pending', 'processing') and ${retired}`,
+        values: [Date.now(), service, connectionName, service, connectionName],
+      },
+      {
         sql: "select id from connections where service = ? and connection_name = ?",
         values: [service, connectionName],
       },
     ]);
-    if (remaining)
+    if (results.at(-1)![0])
       throw new HttpRequestError(
         "connection_has_subscriptions",
         "Cancel or abandon remote Trigger subscriptions before disconnecting this connection.",

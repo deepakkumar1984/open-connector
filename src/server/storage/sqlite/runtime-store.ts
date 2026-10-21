@@ -6,7 +6,6 @@ import type {
   StoredMarketplaceConfig,
 } from "../../../marketplace/marketplace-service.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../../oauth/oauth-client-config-service.ts";
-import type { IOAuthStateStore, OAuthAuthorizationState } from "../../../oauth/oauth-flow-service.ts";
 import type { ISecretCodec } from "../../secrets/secret-codec-core.ts";
 import type { RequestTransaction } from "../connection-request-store.ts";
 import type {
@@ -28,6 +27,7 @@ import { PlainTextSecretCodec } from "../../secrets/secret-codec-core.ts";
 import { ConnectionRequestStore } from "../connection-request-store.ts";
 import { SqlConnectionStore } from "../connection-store.ts";
 import { defaultMigrationSource } from "../migration-source.ts";
+import { SqlOAuthStateStore } from "../oauth-state-store.ts";
 import {
   listRunLogs,
   parseJson,
@@ -91,7 +91,7 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
   readonly connectionStore: SqlConnectionStore;
   readonly triggerStore: SqlTriggerStore;
   readonly oauthClientConfigStore: SqliteOAuthClientConfigStore;
-  readonly oauthStateStore: SqliteOAuthStateStore;
+  readonly oauthStateStore: SqlOAuthStateStore;
   readonly runtimeTokenStore: SqliteRuntimeTokenStore;
   readonly runtimePolicyStore: SqliteRuntimePolicyStore;
   readonly runLogStore: SqliteRunLogStore;
@@ -114,7 +114,7 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
     this.triggerStore = new SqlTriggerStore(transaction, this.secretCodec);
     this.saasProjectStore = new SaasProjectStore(transaction, this.secretCodec);
     this.oauthClientConfigStore = new SqliteOAuthClientConfigStore(this.database, this.secretCodec);
-    this.oauthStateStore = new SqliteOAuthStateStore(this.database, this.secretCodec);
+    this.oauthStateStore = new SqlOAuthStateStore(transaction, this.secretCodec);
     this.runtimeTokenStore = new SqliteRuntimeTokenStore(this.database);
     this.runtimePolicyStore = new SqliteRuntimePolicyStore(this.database);
     this.runLogStore = new SqliteRunLogStore(this.database, options.runLimit ?? DEFAULT_RUN_LIMIT);
@@ -223,7 +223,8 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
   }
 
   resetRuntimeData(): void {
-    runInTransaction(this.database, () =>
+    runInTransaction(this.database, () => {
+      this.database.prepare("update connection_retirements set generation = ?").run(crypto.randomUUID());
       this.database.exec(`
       delete from oauth_sources;
       delete from saas_cleanup;
@@ -239,8 +240,8 @@ export class SqliteRuntimeDatabase implements RuntimeDatabase {
       delete from idempotency_records;
       delete from marketplace_config;
       delete from provider_preferences;
-    `),
-    );
+    `);
+    });
   }
 
   private initialize(migrations: MigrationSource, logger?: RuntimeLogger): void {
@@ -331,40 +332,6 @@ export class SqliteOAuthClientConfigStore implements IOAuthClientConfigStore {
     return await Promise.all(
       rows.map(async (row) => parseJson<OAuthClientConfig>(await this.secretCodec.decode(readString(row, "value")))),
     );
-  }
-}
-
-export class SqliteOAuthStateStore implements IOAuthStateStore {
-  private readonly database: DatabaseSync;
-  private readonly secretCodec: ISecretCodec;
-
-  constructor(database: DatabaseSync, secretCodec: ISecretCodec) {
-    this.database = database;
-    this.secretCodec = secretCodec;
-  }
-
-  async deleteCreatedBefore(cutoff: string): Promise<void> {
-    this.database.prepare("delete from oauth_states where created_at < ?").run(cutoff);
-  }
-
-  async set(state: OAuthAuthorizationState): Promise<void> {
-    this.database
-      .prepare(
-        `
-        insert into oauth_states (state, value, created_at)
-        values (?, ?, ?)
-        on conflict(state) do update set value = excluded.value, created_at = excluded.created_at
-      `,
-      )
-      .run(state.state, await this.secretCodec.encode(JSON.stringify(state)), state.createdAt);
-  }
-
-  async take(state: string): Promise<OAuthAuthorizationState | undefined> {
-    const row = this.database.prepare("select value from oauth_states where state = ?").get(state);
-    this.database.prepare("delete from oauth_states where state = ?").run(state);
-    return row
-      ? parseJson<OAuthAuthorizationState>(await this.secretCodec.decode(readString(row, "value")))
-      : undefined;
   }
 }
 

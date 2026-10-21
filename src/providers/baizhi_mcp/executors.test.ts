@@ -140,6 +140,28 @@ class MemoryConnectionStore implements IConnectionStore {
     return this.stored?.service === service && this.stored.connectionName === connectionName ? this.stored : undefined;
   }
 
+  private readonly retirementGenerations = new Map<string, string>();
+
+  async getRetirementGeneration(service: string, connectionName: string): Promise<string> {
+    const key = JSON.stringify([service, connectionName]);
+    let generation = this.retirementGenerations.get(key);
+    if (!generation) {
+      generation = crypto.randomUUID();
+      this.retirementGenerations.set(key, generation);
+    }
+    return generation;
+  }
+
+  async setIfCurrentGeneration(
+    service: string,
+    connectionName: string,
+    credential: ResolvedCredential,
+    retirementGeneration: string,
+  ) {
+    if ((await this.getRetirementGeneration(service, connectionName)) !== retirementGeneration) return undefined;
+    return this.set(service, connectionName, credential);
+  }
+
   async set(service: string, connectionName: string, credential: ResolvedCredential) {
     this.stored = { id: "synthetic-connection", revision: "1", service, connectionName, credential };
     return this.stored;

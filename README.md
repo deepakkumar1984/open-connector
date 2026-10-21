@@ -29,7 +29,7 @@ prebuilt Actions to agents and applications.
   <tr>
     <td width="33.33%" valign="top">Managed OAuth and hosted runtime, ready to use. No deployment or OAuth app setup.</td>
     <td width="33.33%" valign="top">Run locally or on your own infrastructure with Docker or Node.js. You manage storage and OAuth apps.</td>
-    <td width="33.33%" valign="top"><strong>Cloudflare</strong>, <strong>Fly.io</strong>, <strong>RepoCloud</strong>, <strong>nibrun</strong>, <strong>NEXUS AI</strong>, and more.</td>
+    <td width="33.33%" valign="top"><strong>Cloudflare</strong>, <strong>Fly.io</strong>, <strong>RepoCloud</strong>, <strong>nibrun</strong>, <strong>NEXUS AI</strong>, <strong>Pethost</strong>, and more.</td>
   </tr>
   <tr>
     <td width="33.33%" align="center">🚀 <a href="https://oomol.com/docs/connector-saas/"><strong>OOMOL Hosted</strong></a></td>
@@ -184,6 +184,18 @@ curl -s -X POST http://localhost:3000/v1/actions/github.get_current_user \
   -d '{"input":{}}'
 ```
 
+A GitHub App installation works the same way with no token to paste: store the App ID, the
+installation id and the App's private key, and the runtime mints one-hour installation tokens on
+demand. The connection profile identifies the installation's account; `get_current_user` requires
+a personal access token or OAuth user credential. Installation repository listing supports
+pagination only; omit `visibility`, `sort` and `direction`.
+
+```bash
+curl -s -X PUT http://localhost:3000/api/connections/github \
+  -H 'content-type: application/json' \
+  -d "{\"authType\":\"custom_credential\",\"values\":{\"appId\":\"1234567\",\"installationId\":\"87654321\",\"privateKey\":\"$(awk 'BEGIN{ORS="\\n"}1' app.private-key.pem)\"}}"
+```
+
 For OAuth2 apps, named connections, credential encryption, token refresh, and action policies, see
 [docs/credentials.md](docs/credentials.md) and [docs/configuration.md](docs/configuration.md).
 
@@ -215,19 +227,11 @@ Run OpenConnector from a prebuilt image on GitHub Packages (GHCR): `ghcr.io/oomo
 
 See [docs/docker-ghcr.md](docs/docker-ghcr.md) for tags, pulling, and running.
 
-## Build a Desktop Agent with Wanta
+## A Ready-to-Use AI Bot with Leina
 
-OpenConnector and [Wanta](https://github.com/oomol-lab/wanta) are two open-source projects for AI
-Agents in the OOMOL ecosystem. OpenConnector connects Agents to external services such as Gmail,
-Slack, and Notion. Wanta provides a complete desktop Agent application powered by OpenCode and uses
-OpenConnector to work with connected SaaS services.
+If you want an AI bot you can use out of the box, try [Leina](https://leina.ai/). Leina connects to over 1,500 SaaS apps and lets you customize your own AI agent by choosing its app connections, skills, and knowledge base to fit your team’s workflows.
 
-- **Run locally:** Use your own OpenAI-compatible model without creating a Wanta account.
-- **Build your own:** Fork Wanta and customize its prompts, tools, interface, models, and branding.
-- **Use hosted services:** The optional [hosted experience](https://wanta.ai/) provides managed
-  models, OAuth connections, and team workspaces.
-
-Issues and pull requests are welcome.
+Use it in Slack, Microsoft Teams, Discord, or Telegram to find information, compile weekly reports, organize customer feedback, and prepare sales follow-ups through the apps you authorize.
 
 ## Documentation
 

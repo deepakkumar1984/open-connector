@@ -4,6 +4,7 @@ import type { OAuthAuthorizationState } from "../../oauth/oauth-flow-service.ts"
 import type { ISecretCodec } from "../secrets/secret-codec-core.ts";
 import type { RuntimeRow } from "./runtime-sql.ts";
 
+import { initializeRetirement, lockRetirement, retirementMatches } from "./connection-retirement.ts";
 import { queueSaasConnections, queueSaasRequests } from "./saas-project-store.ts";
 
 export interface ConnectionRequest {
@@ -80,11 +81,14 @@ export class ConnectionRequestStore {
   async create(pending: PendingConnectionRequest): Promise<void> {
     const now = Date.parse(pending.createdAt);
     const value = await this.secretCodec.encode(JSON.stringify(pending));
+    const fence = retirementMatches(pending.service, pending.connectionName, pending.retirementGeneration);
     await this.transaction([
-      ...this.retireRequests(pending.owner, pending.service, now),
+      initializeRetirement(pending.service, pending.connectionName, pending.retirementGeneration),
+      lockRetirement(pending.service, pending.connectionName, pending.retirementGeneration),
+      ...this.retireRequests(pending.owner, pending.service, now, fence),
       {
-        sql: `insert into connection_requests (id, owner, service, state, phase, status, value, expires_at, created_at, updated_at)
-          values (?, ?, ?, ?, 'pending', 'initiated', ?, ?, ?, ?)`,
+        sql: `insert into connection_requests (id, owner, service, state, phase, status, value, expires_at, created_at, updated_at, connection_name)
+          select ?, ?, ?, ?, 'pending', 'initiated', ?, ?, ?, ?, ? where ${fence.sql}`,
         values: [
           pending.connectionRequestId,
           pending.owner,
@@ -94,6 +98,8 @@ export class ConnectionRequestStore {
           pending.expiresAt,
           now,
           now,
+          pending.connectionName,
+          ...fence.values,
         ],
       },
     ]);
@@ -160,8 +166,8 @@ export class ConnectionRequestStore {
         : null;
     signal?.throwIfAborted();
     const now = new Date();
-    const active =
-      "exists (select 1 from connection_requests where kind = 'local' and id = ? and phase = 'processing')";
+    const fence = retirementMatches(pending.service, pending.connectionName, pending.retirementGeneration);
+    const active = `exists (select 1 from connection_requests where kind = 'local' and id = ? and phase = 'processing') and ${fence.sql}`;
     const write: RequestStatement = pending.target
       ? {
           sql: `update connections set value = ?, revision = ?, updated_at = ?, source = 'local',
@@ -176,6 +182,7 @@ export class ConnectionRequestStore {
             id,
             pending.target.revision,
             pending.connectionRequestId,
+            ...fence.values,
             accountId,
           ],
         }
@@ -191,14 +198,17 @@ export class ConnectionRequestStore {
             now.toISOString(),
             accountId,
             pending.connectionRequestId,
+            ...fence.values,
           ],
         };
     const results = await this.transaction([
+      lockRetirement(pending.service, pending.connectionName, pending.retirementGeneration),
       { sql: "update connections set revision = revision where id = ?", values: [id] },
       queueSaasConnections(`id = ? and revision = ? and ${active}`, [
         id,
         pending.target?.revision ?? "",
         pending.connectionRequestId,
+        ...fence.values,
       ]),
       write,
       {
@@ -207,30 +217,37 @@ export class ConnectionRequestStore {
         values: [id, now.getTime(), pending.connectionRequestId, id, revision],
       },
     ]);
-    return results[2].length ? id : undefined;
+    return results[3].length ? id : undefined;
   }
 
-  private retireRequests(owner: string, service: string, now: number): RequestStatement[] {
-    const expired = "expires_at <= ?";
-    const superseded = "owner = ? and service = ? and phase = 'pending'";
+  private retireRequests(
+    owner: string,
+    service: string,
+    now: number,
+    fence: RequestStatement = { sql: "1 = 1", values: [] },
+  ): RequestStatement[] {
+    const expired = `expires_at <= ? and ${fence.sql}`;
+    const superseded = `owner = ? and service = ? and phase = 'pending' and ${fence.sql}`;
+    const expiredValues = [new Date(now - 86_400_000).toISOString(), ...fence.values];
+    const supersededValues = [owner, service, ...fence.values];
     return [
-      queueSaasRequests(expired, [new Date(now - 86_400_000).toISOString()]),
-      queueSaasRequests(superseded, [owner, service]),
+      queueSaasRequests(expired, expiredValues),
+      queueSaasRequests(superseded, supersededValues),
       {
         sql: `update connection_requests set phase = 'completed', status = 'failed', error_code = 'request_expired',
           value = null, candidate_value = null, lease_id = null, lease_until = null, updated_at = ?
           where kind = 'saas' and phase <> 'completed' and ${expired}`,
-        values: [now, new Date(now - 86_400_000).toISOString()],
+        values: [now, ...expiredValues],
       },
       {
-        sql: "delete from connection_requests where expires_at <= ?",
-        values: [new Date(now - 86_400_000).toISOString()],
+        sql: `delete from connection_requests where ${expired}`,
+        values: expiredValues,
       },
       {
         sql: `update connection_requests set phase = 'completed', status = 'failed', error_code = 'request_superseded',
           error_message = 'A newer authorization request replaced this request.', value = null, candidate_value = null,
           lease_id = null, lease_until = null, updated_at = ? where ${superseded} and (kind = 'saas' or expires_at > ?)`,
-        values: [now, owner, service, new Date(now).toISOString()],
+        values: [now, ...supersededValues, new Date(now).toISOString()],
       },
     ];
   }

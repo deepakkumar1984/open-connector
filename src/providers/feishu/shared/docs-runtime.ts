@@ -1,7 +1,13 @@
 import type { FeishuJsonRequest } from "./client.ts";
 
-import { optionalNumber, optionalRecord, optionalStringArray } from "../../../core/cast.ts";
-import { providerInputError } from "../../provider-runtime.ts";
+import {
+  optionalNumber,
+  optionalRecord,
+  optionalRawString,
+  optionalStringArray,
+  requiredString,
+} from "../../../core/cast.ts";
+import { providerInputError, ProviderRequestError, requiredResponseRecord } from "../../provider-runtime.ts";
 
 interface FeishuDocsActionHandler {
   (input: Record<string, unknown>): Promise<unknown>;
@@ -13,6 +19,11 @@ export function createFeishuDocsActionHandlers(request: FeishuJsonRequest): Reco
   return {
     create_document(input) {
       return createDocument(input, request);
+    },
+    async get_document_creation(input) {
+      const taskId = requireString(input.taskId, "taskId");
+      const data = await request({ path: `/docs_ai/v1/async_tasks/${encodeURIComponent(taskId)}` });
+      return normalizeCreation(data, taskId);
     },
     fetch_document(input) {
       return fetchDocument(input, request);
@@ -50,13 +61,64 @@ async function createDocument(input: Record<string, unknown>, request: FeishuJso
     path: "/docs_ai/v1/documents",
     body: {
       format,
+      extra_param: '{"open_create_async":true}',
       content: title ? `${createTitle(format, title)}\n${content}` : content,
       parent_token: parentToken,
       parent_position: parentPosition,
       reference_map: optionalRecord(input.referenceMap),
     },
   });
-  return { document: optionalRecord(data.document) ?? data };
+  return normalizeCreation(data);
+}
+
+function normalizeCreation(data: Record<string, unknown>, expectedTaskId?: string) {
+  if (data.task == null && !expectedTaskId) {
+    return {
+      taskId: null,
+      status: "succeeded",
+      document: requireCreatedDocument(data.document),
+      pollAfterMs: null,
+      failure: null,
+    };
+  }
+  const task = requiredResponseRecord(data.task, "Feishu document creation task");
+  const taskId = optionalRawString(task.task_id) || expectedTaskId;
+  if (!taskId || (expectedTaskId && taskId !== expectedTaskId)) {
+    throw new ProviderRequestError(502, "Feishu document creation task ID is missing or mismatched");
+  }
+  const status = optionalRawString(task.status)?.trim().toLowerCase() || "processing";
+  if (!["processing", "succeeded", "failed", "expired"].includes(status)) {
+    throw new ProviderRequestError(502, `Unsupported Feishu document creation status: ${status}`);
+  }
+  let document: Record<string, unknown> | null = null;
+  if (status === "succeeded") {
+    const result = optionalRecord(task.result);
+    const serialized = optionalRawString(result?.create_document);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(serialized ?? "");
+    } catch {
+      throw new ProviderRequestError(502, "Invalid Feishu document creation result JSON");
+    }
+    document = requireCreatedDocument(optionalRecord(parsed)?.document);
+  }
+  return {
+    taskId,
+    status,
+    document,
+    pollAfterMs: optionalNumber(task.poll_after_ms) ?? null,
+    failure: optionalRecord(task.failure) ?? null,
+  };
+}
+
+function requireCreatedDocument(value: unknown) {
+  const document = requiredResponseRecord(value, "Feishu created document");
+  requiredString(
+    document.document_id,
+    "Feishu created document.document_id",
+    (message) => new ProviderRequestError(502, message),
+  );
+  return document;
 }
 
 async function fetchDocument(input: Record<string, unknown>, request: FeishuJsonRequest) {

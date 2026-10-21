@@ -716,7 +716,7 @@ async function resolveSlidesPresentation(input: Record<string, unknown>, request
     return token;
   }
   const data = await request({
-    path: "/wiki/v2/spaces/get_node",
+    path: "/wiki/v2/spaces/node_by_token",
     query: { token },
   });
   const node = optionalRecord(data.node);

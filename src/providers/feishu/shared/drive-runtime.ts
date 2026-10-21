@@ -72,7 +72,7 @@ async function inspectDriveItem(input: Record<string, unknown>, request: FeishuJ
   let wikiNode: Record<string, unknown> | undefined = undefined;
   if (type === "wiki") {
     const wikiData = await request({
-      path: "/wiki/v2/spaces/get_node",
+      path: "/wiki/v2/spaces/node_by_token",
       query: { token },
     });
     wikiNode = optionalRecord(wikiData.node);

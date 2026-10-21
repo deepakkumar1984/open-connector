@@ -12,12 +12,14 @@ import type { IOAuthClientConfigStore, OAuthClientConfig } from "./oauth-client-
 import type { IOAuthStateStore, OAuthAuthorizationState } from "./oauth-flow-service.ts";
 import type { ProviderOAuthRuntime } from "./oauth-token.ts";
 
+import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCatalogStore } from "../catalog-store.ts";
 import { ConnectionService } from "../connection-service.ts";
 import { provider as slackProvider } from "../providers/slack/definition.ts";
 import { provider as slackbotProvider } from "../providers/slackbot/definition.ts";
 import { provider as tencentDocsProvider } from "../providers/tencent_docs/definition.ts";
+import { provider as zoomProvider } from "../providers/zoom/definition.ts";
 import { AesGcmSecretCodec } from "../server/secrets/secret-codec.ts";
 import { SqliteRuntimeDatabase } from "../server/storage/sqlite/runtime-store.ts";
 import { OAuthClientConfigService } from "./oauth-client-config-service.ts";
@@ -392,7 +394,12 @@ describe("OAuthFlowService", () => {
       extra: { tenant: "default" },
       redirectUri: "app://oauth/callback",
     });
-    await services.states.set({ service: "example", state: "legacy-state", createdAt: new Date().toISOString() });
+    await services.states.set({
+      service: "example",
+      retirementGeneration: await services.connections.getRetirementGeneration("example"),
+      state: "legacy-state",
+      createdAt: new Date().toISOString(),
+    });
     const fetcher = vi.fn(async (_url: string | URL | Request, _init?: RequestInit) =>
       Response.json({ access_token: "access-token", token_type: "Bearer" }),
     );
@@ -882,11 +889,13 @@ describe("OAuthFlowService", () => {
     vi.setSystemTime(new Date("2026-01-01T00:00:01.001Z"));
     await services.states.set({
       service: "example",
+      retirementGeneration: "expired-state-generation",
       state: "expired",
       createdAt: "2026-01-01T00:00:00.000Z",
     });
     await services.states.set({
       service: "example",
+      retirementGeneration: "expired-state-generation",
       state: "current",
       createdAt: "2026-01-01T00:00:00.001Z",
     });
@@ -909,6 +918,7 @@ describe("OAuthFlowService", () => {
     });
     await services.states.set({
       service: "example",
+      retirementGeneration: "expired-state-generation",
       state: "bad-created-at",
       createdAt: "not-a-date",
     });
@@ -1169,12 +1179,35 @@ describe("OAuthFlowService", () => {
     expect(vi.mocked(fetch).mock.calls[0]?.[0]).toBe("https://tenant.example.com/oauth/tenant%2Fa/token");
   });
 
+  it("passes the matching PKCE verifier to a custom token exchange", async () => {
+    let verifier: string | undefined;
+    const services = createServices([pkceOAuthProvider], {
+      oauthRuntime: {
+        async exchangeCode(input) {
+          verifier = input.codeVerifier;
+          return { accessToken: "custom-token", tokenType: "Bearer", metadata: {} };
+        },
+      },
+    });
+    await services.clientConfigs.upsertConfig({ service: "pkce", clientId: "client-id", clientSecret: "secret" });
+    const started = await services.flow.startAuthorization({ service: "pkce" });
+    await services.flow.completeAuthorization({ state: started.state, code: "authorization-code" });
+    expect(verifier).toBeDefined();
+    expect(createHash("sha256").update(verifier!).digest("base64url")).toBe(
+      new URL(started.authorizationUrl).searchParams.get("code_challenge"),
+    );
+  });
+
   it("stores the token returned by a provider OAuth runtime", async () => {
     let callbackParameters: Record<string, string> | undefined;
+    let callbackQuery: string | undefined;
+    let callbackState: string | undefined;
     const services = createServices([oauthProvider], {
       oauthRuntime: {
         async exchangeCode(input) {
           callbackParameters = input.callbackParameters;
+          callbackQuery = input.callbackQuery;
+          callbackState = input.state;
           return {
             accessToken: "provider-access-token",
             refreshToken: "provider-access-token",
@@ -1198,6 +1231,7 @@ describe("OAuthFlowService", () => {
       state: started.state,
       code: "authorization-code",
       callbackParameters: { shop_id: "42" },
+      callbackQuery: "?shop_id=41&shop_id=42&hmac=signature",
     });
 
     await expect(services.connections.getCredential("example")).resolves.toMatchObject({
@@ -1209,6 +1243,8 @@ describe("OAuthFlowService", () => {
       metadata: { permissions: "read,write" },
     });
     expect(callbackParameters).toEqual({ shop_id: "42" });
+    expect(callbackQuery).toBe("?shop_id=41&shop_id=42&hmac=signature");
+    expect(callbackState).toBe(started.state);
   });
 
   it("rejects OAuth endpoint config values that resolve to local network targets", async () => {
@@ -1317,6 +1353,28 @@ class MemoryConnectionStore implements IConnectionStore {
     return this.store.get(createConnectionKey(service, connectionName));
   }
 
+  private readonly retirementGenerations = new Map<string, string>();
+
+  async getRetirementGeneration(service: string, connectionName: string): Promise<string> {
+    const key = JSON.stringify([service, connectionName]);
+    let generation = this.retirementGenerations.get(key);
+    if (!generation) {
+      generation = crypto.randomUUID();
+      this.retirementGenerations.set(key, generation);
+    }
+    return generation;
+  }
+
+  async setIfCurrentGeneration(
+    service: string,
+    connectionName: string,
+    credential: ResolvedCredential,
+    retirementGeneration: string,
+  ) {
+    if ((await this.getRetirementGeneration(service, connectionName)) !== retirementGeneration) return undefined;
+    return this.set(service, connectionName, credential);
+  }
+
   async set(service: string, connectionName: string, credential: ResolvedCredential) {
     const key = createConnectionKey(service, connectionName);
     const connection = {
@@ -1339,6 +1397,7 @@ class MemoryConnectionStore implements IConnectionStore {
   }
 
   async delete(service: string, connectionName: string): Promise<void> {
+    this.retirementGenerations.set(JSON.stringify([service, connectionName]), crypto.randomUUID());
     this.store.delete(createConnectionKey(service, connectionName));
   }
 
@@ -1390,3 +1449,26 @@ class MemoryOAuthStateStore implements IOAuthStateStore {
     return value;
   }
 }
+
+it.each(["cloud_recording:read:recording", "cloud_recording:read:recording:admin"])(
+  "requests Zoom recording access only when explicitly selected: %s",
+  async (recordingScope) => {
+    const services = createServices([{ ...zoomProvider, actions: [] }]);
+    await services.clientConfigs.upsertConfig({ service: "zoom", clientId: "client", clientSecret: "secret" });
+    const meeting = await services.flow.startAuthorization({ service: "zoom" });
+    const defaultScopes = new URL(meeting.authorizationUrl).searchParams.get("scope")!.split(" ");
+    expect(defaultScopes).toContain("meeting:write:meeting");
+    expect(defaultScopes.some((scope) => scope.startsWith("cloud_recording:"))).toBe(false);
+    await services.clientConfigs.upsertConfig({
+      service: "zoom",
+      clientId: "client",
+      clientSecret: "secret",
+      requestedScopes: [...defaultScopes, recordingScope],
+    });
+    const recording = await services.flow.startAuthorization({ service: "zoom" });
+    expect(new URL(recording.authorizationUrl).searchParams.get("scope")!.split(" ")).toEqual([
+      ...defaultScopes,
+      recordingScope,
+    ]);
+  },
+);

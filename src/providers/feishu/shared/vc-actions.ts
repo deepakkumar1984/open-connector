@@ -10,7 +10,7 @@ const meetingId = s.string("The Feishu video meeting ID.", { minLength: 1 });
 const raw = s.looseObject("The raw video-conference object returned by Feishu.");
 export function createFeishuVcActions(options: FeishuVcActionOptions): readonly ActionDefinition[] {
   const queryPermission = options.identity === "user" ? "vc:meeting.meetingevent:read" : "vc:meeting.bot.join:write";
-  return [
+  const actions = [
     defineProviderAction(options.service, {
       name: "join_vc_meeting",
       operationType: "write",
@@ -24,13 +24,17 @@ export function createFeishuVcActions(options: FeishuVcActionOptions): readonly 
             minLength: 9,
             maxLength: 9,
           }),
+          action: s.stringEnum("Join an active meeting or start a Calendar meeting; defaults to join.", [
+            "join",
+            "start",
+          ]),
           password: s.string("The meeting password, when required.", { minLength: 1 }),
           callId: s.string("The correlation ID forwarded by a meeting invite event.", {
             minLength: 1,
           }),
         },
         {
-          optional: ["password", "callId"],
+          optional: ["action", "password", "callId"],
         },
       ),
       outputSchema: s.object(
@@ -158,4 +162,7 @@ export function createFeishuVcActions(options: FeishuVcActionOptions): readonly 
       ),
     }),
   ];
+  return options.identity === "tenant"
+    ? actions
+    : actions.filter((action) => !["join_vc_meeting", "leave_vc_meeting"].includes(action.name));
 }

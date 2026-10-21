@@ -243,7 +243,13 @@ a.button{text-decoration:none}
 
 export const oauthCompletionLocaleScript = `const pick=()=>{try{const stored=localStorage.getItem("oomol-connect.lang");if(Object.hasOwn(STR,stored))return stored;}catch{}const langs=navigator.languages&&navigator.languages.length?navigator.languages:[navigator.language||"en"];for(const raw of langs){const l=String(raw).toLowerCase();if(l.startsWith("zh"))return (!l.includes("hans")&&(l.includes("tw")||l.includes("hk")||l.includes("mo")||l.includes("hant")))?"zh-TW":"zh-CN";const primary=l.split("-")[0];if(STR[raw])return raw;if(STR[primary])return primary;}return "en";};`;
 
-export function renderOAuthCompletionPage(service: string): string {
+/** Seconds the OAuth completion page counts down before it tries to close its window. */
+export const DEFAULT_OAUTH_CLOSE_DELAY_SECONDS = 5;
+
+export function renderOAuthCompletionPage(
+  service: string,
+  closeDelaySeconds: number = DEFAULT_OAUTH_CLOSE_DELAY_SECONDS,
+): string {
   const payload = scriptJson({
     type: oauthCompletedType,
     service,
@@ -265,7 +271,7 @@ export function renderOAuthCompletionPage(service: string): string {
   </div>
   <div class="actions">
     <button class="button" type="button" data-t="closeButton">Close window</button>
-    <p class="close-note" data-close-note>Automatically closing in 5 seconds.</p>
+    <p class="close-note" data-close-note>Automatically closing in ${closeDelaySeconds} seconds.</p>
   </div>
 </main>
 <script>(()=>{
@@ -283,7 +289,7 @@ const showManual=()=>{if(note)note.textContent=t.manualClose;};
 // navigated to it is a no-op. Attempt it, then fall back to a manual hint.
 const tryClose=()=>{window.close();setTimeout(showManual,300);};
 if(button)button.addEventListener("click",tryClose);
-let remaining=5;
+let remaining=${scriptJson(closeDelaySeconds)};
 const tick=()=>{if(remaining<=0){tryClose();return;}if(note)note.textContent=t.autoClose.replace("%N%",String(remaining));remaining-=1;setTimeout(tick,1000);};
 tick();
 })();</script>

@@ -7,7 +7,6 @@ import type {
   StoredMarketplaceConfig,
 } from "../../../marketplace/marketplace-service.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../../oauth/oauth-client-config-service.ts";
-import type { IOAuthStateStore, OAuthAuthorizationState } from "../../../oauth/oauth-flow-service.ts";
 import type { ISecretCodec } from "../../secrets/secret-codec-core.ts";
 import type { RequestTransaction } from "../connection-request-store.ts";
 import type {
@@ -29,6 +28,7 @@ import { parseRuntimeActionHttpResult } from "../../api/runtime-api.ts";
 import { PlainTextSecretCodec } from "../../secrets/secret-codec-core.ts";
 import { ConnectionRequestStore } from "../connection-request-store.ts";
 import { SqlConnectionStore } from "../connection-store.ts";
+import { SqlOAuthStateStore } from "../oauth-state-store.ts";
 import {
   listRunLogs,
   parseJson,
@@ -58,7 +58,7 @@ export class PostgresRuntimeDatabase implements RuntimeDatabase {
   readonly connectionStore: IConnectionStore;
   readonly triggerStore: SqlTriggerStore;
   readonly oauthClientConfigStore: IOAuthClientConfigStore;
-  readonly oauthStateStore: IOAuthStateStore;
+  readonly oauthStateStore: SqlOAuthStateStore;
   readonly runtimeTokenStore: IRuntimeTokenStore;
   readonly runtimePolicyStore: IRuntimePolicyStore;
   readonly runLogStore: IRunLogStore;
@@ -94,7 +94,7 @@ export class PostgresRuntimeDatabase implements RuntimeDatabase {
     this.triggerStore = new SqlTriggerStore(transaction, this.secretCodec);
     this.saasProjectStore = new SaasProjectStore(transaction, this.secretCodec);
     this.oauthClientConfigStore = new PostgresOAuthClientConfigStore(pool, this.secretCodec);
-    this.oauthStateStore = new PostgresOAuthStateStore(pool, this.secretCodec);
+    this.oauthStateStore = new SqlOAuthStateStore(transaction, this.secretCodec);
     this.runtimeTokenStore = new PostgresRuntimeTokenStore(pool);
     this.runtimePolicyStore = new PostgresRuntimePolicyStore(pool);
     this.runLogStore = new PostgresRunLogStore(pool, options.runLimit ?? DEFAULT_RUN_LIMIT);
@@ -132,6 +132,7 @@ export class PostgresRuntimeDatabase implements RuntimeDatabase {
   async resetRuntimeData(): Promise<void> {
     await runInTransaction(this.pool, async (client) => {
       await client.query("select pg_advisory_xact_lock(1326382671, 2)");
+      await client.query("update connection_retirements set generation = $1", [crypto.randomUUID()]);
       await client.query(`
         delete from oauth_sources;
         delete from saas_cleanup;
@@ -349,41 +350,6 @@ class PostgresOAuthClientConfigStore implements IOAuthClientConfigStore {
         parseJson<OAuthClientConfig>(await this.secretCodec.decode(readString(row, "value"))),
       ),
     );
-  }
-}
-
-class PostgresOAuthStateStore implements IOAuthStateStore {
-  private readonly pool: Pool;
-  private readonly secretCodec: ISecretCodec;
-
-  constructor(pool: Pool, secretCodec: ISecretCodec) {
-    this.pool = pool;
-    this.secretCodec = secretCodec;
-  }
-
-  async deleteCreatedBefore(cutoff: string): Promise<void> {
-    await this.pool.query("delete from oauth_states where created_at < $1", [cutoff]);
-  }
-
-  async set(state: OAuthAuthorizationState): Promise<void> {
-    await this.pool.query(
-      `
-        insert into oauth_states (state, value, created_at)
-        values ($1, $2, $3)
-        on conflict(state) do update set value = excluded.value, created_at = excluded.created_at
-      `,
-      [state.state, await this.secretCodec.encode(JSON.stringify(state)), state.createdAt],
-    );
-  }
-
-  async take(state: string): Promise<OAuthAuthorizationState | undefined> {
-    const result = await this.pool.query<RuntimeRow>("delete from oauth_states where state = $1 returning value", [
-      state,
-    ]);
-    const row = result.rows[0];
-    return row
-      ? parseJson<OAuthAuthorizationState>(await this.secretCodec.decode(readString(row, "value")))
-      : undefined;
   }
 }
 

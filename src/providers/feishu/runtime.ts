@@ -233,7 +233,14 @@ async function feishuApiRequest(input: FeishuApiRequestInput): Promise<Record<st
   if (!response.ok || code !== 0) {
     const message = optionalString(envelope.msg) ?? `Feishu request failed (HTTP ${response.status}).`;
     const status = mapFeishuErrorStatus(response.status, code);
-    throw new ProviderRequestError(status, code ? `Feishu ${code}: ${message}` : message);
+    throw new ProviderRequestError(
+      status,
+      code ? `Feishu ${code}: ${message}` : message,
+      undefined,
+      feishuCredentialErrorCodes.has(code) || feishuScopeErrorCodes.has(code)
+        ? "authorization_failed"
+        : "provider_error",
+    );
   }
 
   const data = optionalRecord(envelope.data);
@@ -271,7 +278,7 @@ function normalizeFeishuPage(data: Record<string, unknown>): Record<string, unkn
 }
 
 function mapFeishuErrorStatus(httpStatus: number, code: number): number {
-  if (httpStatus === 401 || feishuCredentialErrorCodes.has(code)) {
+  if (feishuCredentialErrorCodes.has(code)) {
     return 401;
   }
   if (httpStatus === 403 || feishuScopeErrorCodes.has(code)) {

@@ -120,6 +120,59 @@ describe("OAuthCredentialRefreshService", () => {
     expect(refreshed.expiresAt).toBe(new Date(now + 3600_000).toISOString());
   });
 
+  it("keeps the stored lifetime when a provider runtime reports only an expiry", async () => {
+    const providerLoader = new ProviderLoader({
+      example: async () => ({
+        executors: {},
+        oauth: {
+          async refreshAccessToken() {
+            return {
+              accessToken: "provider-refreshed-token",
+              tokenType: "Bearer",
+              expiresAt: "2026-12-29T00:00:00.000Z",
+              metadata: { refreshedBy: "provider-runtime" },
+            };
+          },
+        },
+      }),
+    });
+
+    const refreshed = await new OAuthCredentialRefreshService(clientConfigs, providerLoader).refresh(
+      "example",
+      expiredCredential({ expires_in: 3600 }),
+    );
+
+    expect(refreshed.metadata.expires_in).toBe(3600);
+    expect(refreshed.expiresAt).toBe("2026-12-29T00:00:00.000Z");
+  });
+
+  it("prefers the lifetime a provider runtime reports without an expiry", async () => {
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now);
+    const providerLoader = new ProviderLoader({
+      example: async () => ({
+        executors: {},
+        oauth: {
+          async refreshAccessToken() {
+            return {
+              accessToken: "provider-refreshed-token",
+              tokenType: "Bearer",
+              metadata: { expires_in: 120 },
+            };
+          },
+        },
+      }),
+    });
+
+    const refreshed = await new OAuthCredentialRefreshService(clientConfigs, providerLoader).refresh(
+      "example",
+      expiredCredential({ expires_in: 3600 }),
+    );
+
+    expect(refreshed.metadata.expires_in).toBe(120);
+    expect(refreshed.expiresAt).toBe(new Date(now + 120_000).toISOString());
+  });
+
   it("refreshes through a provider OAuth runtime and preserves connection identity", async () => {
     let receivedMetadata: Record<string, unknown> | undefined;
     let receivedProviderSecret: Record<string, unknown> | undefined;
@@ -360,5 +413,43 @@ describe("OAuthCredentialRefreshService revoke", () => {
       "Configure an OAuth client for example before revoking its token.",
     );
     expect(fetcher).not.toHaveBeenCalled();
+  });
+});
+
+describe("Feishu refresh override integration", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it.each([
+    [20037, "oauth_token_refresh_failed"],
+    [undefined, "provider_error"],
+  ])("preserves the provider classification for error %s through the loader", async (code, expectedCode) => {
+    const providerLoader = new ProviderLoader({ feishu: () => import("../providers/feishu/executors.ts") });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ code, error_description: "Rejected" }, { status: 401 })),
+    );
+    await expect(
+      new OAuthCredentialRefreshService(clientConfigs, providerLoader).refresh(
+        "feishu",
+        expiredCredential({ expires_in: 3600 }),
+      ),
+    ).rejects.toMatchObject({ code: expectedCode });
+  });
+
+  it("retains refresh token, scopes and expiry when Feishu rotates only the access token", async () => {
+    const providerLoader = new ProviderLoader({ feishu: () => import("../providers/feishu/executors.ts") });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ code: 0, access_token: "rotated" })),
+    );
+    const previous = expiredCredential({ expires_in: 3600, scope: "offline_access" });
+    const refreshed = await new OAuthCredentialRefreshService(clientConfigs, providerLoader).refresh(
+      "feishu",
+      previous,
+    );
+    expect(refreshed.accessToken).toBe("rotated");
+    expect(refreshed.refreshToken).toBe(previous.refreshToken);
+    expect(refreshed.metadata.scope).toBe("offline_access");
+    expect(Date.parse(refreshed.expiresAt!)).toBeGreaterThan(Date.now());
   });
 });

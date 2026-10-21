@@ -1,7 +1,7 @@
 import type { ExecutionContext, ResolvedCredential } from "../core/types.ts";
 import type { ProviderActionHandlers, ProviderActionSources } from "./provider-runtime.ts";
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
 import { isPrivateNetworkAccessAllowed, setPrivateNetworkAccessAllowed } from "../core/request.ts";
 import {
   createProviderTimeout,
@@ -16,11 +16,15 @@ import {
   providerInputError,
   ProviderRequestError,
   providerResponseError,
+  readProviderErrorTextBody,
   readProviderJson,
+  readProviderProxyErrorMessage,
+  readProviderProxyResponse,
   requiredInputString,
   requiredResponseRecord,
   runProviderRequest,
   toProviderExecutionError,
+  uploadProviderUrlToTransitFile,
 } from "./provider-runtime.ts";
 
 afterEach(() => {
@@ -29,15 +33,11 @@ afterEach(() => {
 });
 
 describe("ProviderRequestError", () => {
-  it("keeps provider error codes on the shared request error", () => {
-    const error = new ProviderRequestError(429, "Provider quota exhausted", { retryAfter: 30 }, "rate_limited");
-
-    expect(error).toMatchObject({
-      status: 429,
-      message: "Provider quota exhausted",
-      details: { retryAfter: 30 },
-      code: "rate_limited",
-    });
+  it("restricts explicit codes to the provider vocabulary", () => {
+    expectTypeOf<ConstructorParameters<typeof ProviderRequestError>[3]>().toEqualTypeOf<
+      "authorization_failed" | "insufficient_credit" | "invalid_input" | "provider_error" | "rate_limited" | undefined
+    >();
+    expectTypeOf<ProviderRequestError["code"]>().toEqualTypeOf<ConstructorParameters<typeof ProviderRequestError>[3]>();
   });
 });
 
@@ -45,11 +45,15 @@ describe("toProviderExecutionError", () => {
   it("prefers an explicit provider error code over status inference", () => {
     expect(
       toProviderExecutionError(
-        new ProviderRequestError(402, "Provider credit exhausted", undefined, "insufficient_credit"),
+        new ProviderRequestError(402, "Provider credit exhausted", { balance: 0 }, "insufficient_credit"),
         "failed",
       ),
     ).toMatchObject({
-      error: { code: "insufficient_credit" },
+      error: {
+        code: "insufficient_credit",
+        message: "Provider credit exhausted",
+        details: { status: 402, details: { balance: 0 } },
+      },
     });
   });
 
@@ -91,6 +95,203 @@ describe("readProviderJson", () => {
       message: "provider request failed",
     });
   });
+});
+
+describe("readProviderProxyResponse", () => {
+  it.each([
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "Application/Vnd.Openxmlformats-Officedocument.Wordprocessingml.Document ; charset=binary",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+  ])("preserves binary OpenXML bytes for %s", async (contentType) => {
+    // Synthetic ZIP-like bytes with invalid UTF-8, not a real Office document.
+    const bytes = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x80, 0xc3, 0x28]);
+    const headers = { "content-type": contentType, "x-request-id": "synthetic-download" };
+
+    const result = await readProviderProxyResponse(new Response(bytes, { status: 206, headers }));
+
+    expect(result).toEqual({ status: 206, headers, bodyEncoding: "base64", data: expect.any(String) });
+    expect(Buffer.from(result.data as string, "base64")).toEqual(Buffer.from(bytes));
+  });
+
+  it.each([
+    "Application/XML ; charset=UTF-8",
+    "application/xml-external-parsed-entity; charset=UTF-8",
+    "Application/XML-DTD ; charset=UTF-8",
+    "Image/SVG+XML ; charset=UTF-8",
+  ])("keeps XML responses as text for %s", async (contentType) => {
+    const data = "<root>café</root>";
+    const headers = { "content-type": contentType };
+
+    await expect(readProviderProxyResponse(new Response(data, { headers }))).resolves.toEqual({
+      status: 200,
+      headers,
+      data,
+    });
+  });
+});
+
+describe("readProviderProxyErrorMessage", () => {
+  it("keeps a bounded proxy error body", async () => {
+    await expect(
+      readProviderProxyErrorMessage(new Response('{"error":"nope"}', { status: 502 }), "provider request failed"),
+    ).resolves.toBe('{"error":"nope"}');
+  });
+
+  it("falls back when the proxy error body exceeds the shared error cap", async () => {
+    await expect(
+      readProviderProxyErrorMessage(new Response("x".repeat(65 * 1024), { status: 502 }), "provider request failed"),
+    ).resolves.toBe("provider request failed");
+  });
+});
+
+/** A response whose body fails as soon as it is read. */
+function abortingErrorResponse(): Response {
+  return new Response(
+    new ReadableStream({
+      start(controller) {
+        controller.error(new DOMException("The operation was aborted.", "AbortError"));
+      },
+    }),
+    { status: 502 },
+  );
+}
+
+describe("readProviderErrorTextBody", () => {
+  it("rethrows an abort raised while reading an error body", async () => {
+    await expect(readProviderErrorTextBody(abortingErrorResponse(), "provider error response")).rejects.toMatchObject({
+      name: "AbortError",
+    });
+  });
+
+  it("keeps swallowing a non-abort read failure", async () => {
+    const response = new Response(
+      new ReadableStream({
+        start(controller) {
+          controller.error(new Error("stream broken"));
+        },
+      }),
+      { status: 502 },
+    );
+
+    await expect(readProviderErrorTextBody(response, "provider error response")).resolves.toBe("");
+  });
+
+  it("reports a timeout when reading an error body is aborted", async () => {
+    await expect(
+      runProviderRequest({ label: "provider" }, async () => readProviderJson(abortingErrorResponse(), "provider")),
+    ).rejects.toMatchObject({ status: 504, message: "provider request timed out" });
+  });
+});
+
+describe("uploadProviderUrlToTransitFile", () => {
+  it("maps an aborted transit download to a timeout", async () => {
+    const fetcher = vi.fn(async () => {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    });
+
+    await expect(
+      uploadProviderUrlToTransitFile(
+        { url: "https://files.example.com/report.pdf", name: "report.pdf", source: "Example" },
+        { fetcher, transitFiles: { maxBytes: 1024 } as never, signal: undefined },
+      ),
+    ).rejects.toMatchObject({ status: 504, message: "Example transit download timed out" });
+  });
+
+  it("maps an abort raised while reading the transit body to a timeout", async () => {
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(controller) {
+              controller.error(new DOMException("The operation was aborted.", "AbortError"));
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await expect(
+      uploadProviderUrlToTransitFile(
+        { url: "https://files.example.com/report.pdf", name: "report.pdf", source: "Example" },
+        { fetcher, transitFiles: { maxBytes: 1024 } as never, signal: undefined },
+      ),
+    ).rejects.toMatchObject({ status: 504, message: "Example transit download timed out" });
+  });
+
+  it("maps a custom abort reason from an error-body read to a timeout", async () => {
+    const reason = new Error("runtime shutting down");
+    const controller = new AbortController();
+    controller.abort(reason);
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream({
+            start(streamController) {
+              streamController.error(reason);
+            },
+          }),
+          { status: 500 },
+        ),
+    );
+
+    await expect(
+      uploadProviderUrlToTransitFile(
+        { url: "https://files.example.com/report.pdf", name: "report.pdf", source: "Example" },
+        { fetcher, transitFiles: { maxBytes: 1024 } as never, signal: controller.signal },
+      ),
+    ).rejects.toMatchObject({ status: 504, message: "Example transit download timed out" });
+  });
+
+  it("cancels a pending error-body read through the caller signal", async () => {
+    const reason = new Error("runtime shutting down");
+    const controller = new AbortController();
+    const reading = Promise.withResolvers<void>();
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull() {
+              reading.resolve();
+            },
+          }),
+          { status: 500 },
+        ),
+    );
+    const pending = uploadProviderUrlToTransitFile(
+      { url: "https://files.example.com/report.pdf", name: "report.pdf", source: "Example" },
+      { fetcher, transitFiles: { maxBytes: 1024 } as never, signal: controller.signal },
+    );
+
+    await reading.promise;
+    controller.abort(reason);
+
+    await expect(pending).rejects.toMatchObject({ status: 504, message: "Example transit download timed out" });
+  }, 1_000);
+
+  it("aborts the transit body read through the caller signal", async () => {
+    const controller = new AbortController();
+    const reading = Promise.withResolvers<void>();
+    const fetcher = vi.fn(
+      async () =>
+        new Response(
+          new ReadableStream<Uint8Array>({
+            pull() {
+              reading.resolve();
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+    const pending = uploadProviderUrlToTransitFile(
+      { url: "https://files.example.com/report.pdf", name: "report.pdf", source: "Example" },
+      { fetcher, transitFiles: { maxBytes: 1024 } as never, signal: controller.signal },
+    );
+
+    await reading.promise;
+    controller.abort();
+
+    await expect(pending).rejects.toMatchObject({ status: 504, message: "Example transit download timed out" });
+  }, 1_000);
 });
 
 describe("defineProviderExecutors", () => {
@@ -819,6 +1020,28 @@ describe("provider egress SSRF guard", () => {
     expect(result.ok).toBe(false);
     if (result.ok) throw new Error("expected failure");
     expect(result.error).toMatchObject({ code: "invalid_input", details: { status: 413 } });
+  });
+
+  it("keeps an oversized proxy error body as a provider error", async () => {
+    stubFetchSequence([
+      new Response("upstream failure", { status: 500, headers: { "content-length": String(21 * 1024 * 1024) } }),
+    ]);
+    const proxy = defineProviderProxy({
+      service: "test_service",
+      baseUrl: "https://api.example.com",
+      auth: { type: "none" },
+    });
+
+    const result = await proxy({ method: "GET", endpoint: "/items" }, executionContext);
+
+    expect(result).toMatchObject({
+      ok: false,
+      error: {
+        code: "provider_error",
+        details: { status: 500 },
+        message: "provider request failed with HTTP 500",
+      },
+    });
   });
 
   it.each(["text", [], 1])("rejects a non-object JSON auth body: %j", async (body) => {

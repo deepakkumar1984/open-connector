@@ -59,7 +59,15 @@ const recordedAnswers: Record<string, string> = {
       fetch: { status: "available" },
     },
   }),
+  // The write answers are synthetic: the server's shapes for them were not recorded, so the readers accept a
+  // listed record, a single record and a prose answer alike, and the raw text always travels beside them.
+  "notion-create-pages": JSON.stringify({
+    pages: [{ id: "p-9", url: "https://www.notion.so/Notes-0123456789abcdef0123456789abcdef", title: "Notes" }],
+  }),
+  "notion-update-page": "Updated the page at https://www.notion.so/Roadmap-fedcba9876543210fedcba9876543210.",
+  "notion-create-comment": JSON.stringify({ id: "c-9", discussion_id: "d-9", plain_text: "Looks good." }),
 };
+const writeTools = ["notion-create-pages", "notion-update-page", "notion-create-comment"];
 
 interface SyntheticCall {
   name: string;
@@ -309,6 +317,176 @@ describe("notion_mcp executors", () => {
     }
   });
 
+  it("create_pages forwards the pages with their parent and lifts the pages the server named", async () => {
+    const host = createSyntheticHost(allTools);
+    try {
+      const result = await executors["notion_mcp.create_pages"]!(
+        {
+          pages: [{ properties: { title: "Notes" }, content: "# Notes\n\nFirst line." }],
+          parent: { page_id: "p-1" },
+          allow_async: false,
+        },
+        executionContext(),
+      );
+      expect(result).toEqual({
+        ok: true,
+        output: {
+          pages: [{ id: "p-9", url: "https://www.notion.so/Notes-0123456789abcdef0123456789abcdef", title: "Notes" }],
+          raw: recordedAnswers["notion-create-pages"],
+        },
+      });
+      expect(host.calls).toEqual([
+        {
+          name: "notion-create-pages",
+          args: {
+            pages: [{ properties: { title: "Notes" }, content: "# Notes\n\nFirst line." }],
+            parent: { page_id: "p-1" },
+            allow_async: false,
+          },
+        },
+      ]);
+      expect(await executors["notion_mcp.create_pages"]!({ pages: [] }, executionContext())).toMatchObject({
+        ok: false,
+        error: { message: "pages is required." },
+      });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("create_pages reads the page links out of a prose answer and the task id out of a deferred one", async () => {
+    const host = createSyntheticHost(allTools, undefined, {
+      ...recordedAnswers,
+      "notion-create-pages":
+        "Created 2 pages: https://www.notion.so/A-0123456789abcdef0123456789abcdef and https://www.notion.so/B-11112222333344445555666677778888?pvs=4",
+    });
+    try {
+      expect(
+        await executors["notion_mcp.create_pages"]!({ pages: [{ content: "x" }] }, executionContext()),
+      ).toMatchObject({
+        ok: true,
+        output: {
+          pages: [
+            { id: "0123456789abcdef0123456789abcdef", url: "https://www.notion.so/A-0123456789abcdef0123456789abcdef" },
+            {
+              id: "11112222333344445555666677778888",
+              url: "https://www.notion.so/B-11112222333344445555666677778888?pvs=4",
+            },
+          ],
+        },
+      });
+    } finally {
+      await host.close();
+    }
+    const deferred = createSyntheticHost(allTools, undefined, {
+      ...recordedAnswers,
+      "notion-create-pages": JSON.stringify({ object: "async_task", id: "task-1", status: "queued" }),
+    });
+    try {
+      expect(await executors["notion_mcp.create_pages"]!({ pages: [{ content: "x" }] }, executionContext())).toEqual({
+        ok: true,
+        output: {
+          pages: [],
+          async_task_id: "task-1",
+          raw: JSON.stringify({ object: "async_task", id: "task-1", status: "queued" }),
+        },
+      });
+    } finally {
+      await deferred.close();
+    }
+  });
+
+  it("update_page preserves async task IDs, warning objects and raw MCP responses", async () => {
+    const warnings = [{ code: "no_match", message: "No matching text", details: { index: 1 } }];
+    const raw = JSON.stringify({ object: "async_task", id: "task-2", status: "queued", warnings });
+    const host = createSyntheticHost(allTools, undefined, { ...recordedAnswers, "notion-update-page": raw });
+    try {
+      expect(
+        await executors["notion_mcp.update_page"]!({ page_id: "p-1", command: "update_content" }, executionContext()),
+      ).toEqual({
+        ok: true,
+        output: { page_id: "p-1", async_task_id: "task-2", warnings, raw },
+      });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("update_page forwards the command and echoes the page id with the link the answer names", async () => {
+    const host = createSyntheticHost(allTools);
+    try {
+      const result = await executors["notion_mcp.update_page"]!(
+        {
+          page_id: "p-1",
+          command: "update_content",
+          content_updates: [{ old_str: "Q4 & beyond", new_str: "Q4, Q1 and beyond" }],
+        },
+        executionContext(),
+      );
+      expect(result).toEqual({
+        ok: true,
+        output: {
+          page_id: "p-1",
+          url: "https://www.notion.so/Roadmap-fedcba9876543210fedcba9876543210",
+          raw: recordedAnswers["notion-update-page"],
+        },
+      });
+      expect(host.calls).toEqual([
+        {
+          name: "notion-update-page",
+          args: {
+            page_id: "p-1",
+            command: "update_content",
+            content_updates: [{ old_str: "Q4 & beyond", new_str: "Q4, Q1 and beyond" }],
+          },
+        },
+      ]);
+      expect(await executors["notion_mcp.update_page"]!({ page_id: "p-1" }, executionContext())).toMatchObject({
+        ok: false,
+        error: { message: "command is required." },
+      });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("create_comment forwards the markdown and lifts the comment the server named", async () => {
+    const host = createSyntheticHost(allTools);
+    try {
+      const result = await executors["notion_mcp.create_comment"]!(
+        { page_id: "p-1", markdown: "Looks good.", reply_to_comment_id: "c-1" },
+        executionContext(),
+      );
+      expect(result).toEqual({
+        ok: true,
+        output: { comment: { id: "c-9", discussion_id: "d-9" }, raw: recordedAnswers["notion-create-comment"] },
+      });
+      expect(host.calls).toEqual([
+        {
+          name: "notion-create-comment",
+          args: { page_id: "p-1", markdown: "Looks good.", reply_to_comment_id: "c-1" },
+        },
+      ]);
+      expect(await executors["notion_mcp.create_comment"]!({ page_id: "p-1" }, executionContext())).toMatchObject({
+        ok: false,
+        error: { message: "markdown is required." },
+      });
+    } finally {
+      await host.close();
+    }
+    const prose = createSyntheticHost(allTools, undefined, {
+      ...recordedAnswers,
+      "notion-create-comment": "Comment added.",
+    });
+    try {
+      expect(
+        await executors["notion_mcp.create_comment"]!({ page_id: "p-1", markdown: "Hi" }, executionContext()),
+      ).toEqual({ ok: true, output: { raw: "Comment added." } });
+    } finally {
+      await prose.close();
+    }
+  });
+
   it("reports a tool error as a provider error", async () => {
     const host = createSyntheticHost([], async (request) => {
       if (request.method !== "POST") return undefined;
@@ -365,8 +543,8 @@ describe("notion_mcp executors", () => {
   });
 
   it.each([
-    [401, "authorization_failed"],
-    [403, "authorization_failed"],
+    [401, "provider_error"],
+    [403, "provider_error"],
     [429, "rate_limited"],
   ])("maps a synthetic HTTP %i and never returns the token in the error", async (status, code) => {
     const host = createSyntheticHost([], async (request) =>
@@ -383,7 +561,20 @@ describe("notion_mcp executors", () => {
 });
 
 describe("notion_mcp credential validator", () => {
-  it("requires every mapped tool, then keys the account by the self user id", async () => {
+  it("validates a connection whose server lists the reads and none of the writes", async () => {
+    const host = createSyntheticHost(allTools.filter((name) => !writeTools.includes(name)));
+    try {
+      const result = await credentialValidators.oauth2!(oauthCredential(), { fetcher: host.fetcher });
+      expect(result).toMatchObject({
+        profile: { accountId: "u-me-0001" },
+        metadata: { discoveredToolCount: allTools.length - writeTools.length },
+      });
+    } finally {
+      await host.close();
+    }
+  });
+
+  it("requires every read tool, then keys the account by the self user id", async () => {
     const host = createSyntheticHost(allTools);
     try {
       const result = await credentialValidators.oauth2!(oauthCredential(), { fetcher: host.fetcher });
@@ -431,14 +622,15 @@ describe("notion_mcp credential validator", () => {
     }
   });
 
-  it("reports a rejected token as invalid credentials at sign-in", async () => {
+  it("preserves an ambiguous authorization failure at sign-in", async () => {
     const host = createSyntheticHost([], async (request) =>
       request.method === "POST" ? new Response("nope", { status: 401 }) : undefined,
     );
     try {
       await expect(credentialValidators.oauth2!(oauthCredential(), { fetcher: host.fetcher })).rejects.toMatchObject({
-        status: 400,
-        message: "Notion MCP credential is invalid or expired.",
+        status: 401,
+        code: "provider_error",
+        message: expect.stringMatching(/Notion MCP (authorization request failed|request failed with HTTP 401)/),
       });
     } finally {
       await host.close();

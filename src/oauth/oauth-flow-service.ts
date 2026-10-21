@@ -44,6 +44,7 @@ export interface OAuthAuthorizationCompleteInput {
   state: string;
   code: string;
   callbackParameters?: Record<string, string>;
+  callbackQuery?: string;
   signal?: AbortSignal;
 }
 
@@ -53,6 +54,7 @@ export interface OAuthAuthorizationCompleteInput {
 export interface OAuthAuthorizationState {
   service: string;
   connectionName?: string;
+  retirementGeneration: string;
   state: string;
   createdAt: string;
   pkceCodeVerifier?: string;
@@ -212,8 +214,10 @@ export class OAuthFlowService {
     input: OAuthAuthorizationStartInput,
     requestConfig?: OAuthClientConfig,
   ): Promise<{ pending: OAuthAuthorizationState; authorizationUrl: string }> {
-    const { service, connectionName } = input;
+    const { service } = input;
+    const connectionName = normalizeConnectionName(input.connectionName);
     this.connections.assertProviderAvailable(service);
+    const retirementGeneration = await this.connections.getRetirementGeneration(service, connectionName);
     const auth = this.clientConfigs.getOAuthDefinition(service);
     const config =
       requestConfig ??
@@ -236,6 +240,7 @@ export class OAuthFlowService {
     const pending: OAuthAuthorizationState = {
       service,
       connectionName,
+      retirementGeneration,
       state,
       createdAt: now.toISOString(),
       pkceCodeVerifier,
@@ -281,7 +286,7 @@ export class OAuthFlowService {
   ): Promise<{ service: string; connected: true; returnUri?: string }> {
     const request = await this.requests.claim(input.state);
     const pending = request ?? (await this.states.take(input.state));
-    if (!pending) {
+    if (!pending || typeof pending.retirementGeneration !== "string") {
       throw new OAuthFlowError("invalid_oauth_state", "OAuth state is missing or expired.");
     }
     if (!request && isExpiredOAuthState(pending, this.stateMaxAgeMs)) {
@@ -314,6 +319,9 @@ export class OAuthFlowService {
           if (providerOAuth?.exchangeCode) {
             return providerOAuth.exchangeCode({
               code: input.code,
+              codeVerifier: pending.pkceCodeVerifier,
+              state: pending.state,
+              callbackQuery: input.callbackQuery,
               callbackParameters: input.callbackParameters,
               clientConfig: config,
               redirectUri,
@@ -408,6 +416,7 @@ export class OAuthFlowService {
           oauthCredential,
           pending.connectionName,
           input.signal,
+          pending.retirementGeneration,
         );
       }
       return {

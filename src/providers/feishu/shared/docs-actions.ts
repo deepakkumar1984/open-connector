@@ -37,6 +37,13 @@ const documentOutputSchema = s.object(
     optional: [],
   },
 );
+const creationOutputSchema = s.requiredObject("The document creation status and result.", {
+  taskId: s.nullable(s.string("The task ID to poll; null when creation completed synchronously.")),
+  status: s.stringEnum("The document creation state.", ["processing", "succeeded", "failed", "expired"]),
+  document: s.nullable(looseDocumentSchema),
+  pollAfterMs: s.nullable(s.integer("The suggested delay before the next status request.")),
+  failure: s.nullable(s.looseObject("The upstream failure code and message, if creation failed.")),
+});
 const taskOutputSchema = s.looseRequiredObject(
   "A Feishu document background task result.",
   {
@@ -57,6 +64,10 @@ export function createFeishuDocsActions(service: string): readonly ActionDefinit
   return [
     defineProviderAction(service, {
       name: "create_document",
+      asyncLifecycle: {
+        startActionId: `${service}.create_document`,
+        statusActionId: `${service}.get_document_creation`,
+      },
       operationType: "write",
       description:
         "Create a Feishu document from Docx XML or Markdown content, optionally inside a folder or Wiki node.",
@@ -86,7 +97,23 @@ export function createFeishuDocsActions(service: string): readonly ActionDefinit
           optional: ["title", "format", "parentToken", "parentPosition", "referenceMap"],
         },
       ),
-      outputSchema: documentOutputSchema,
+      outputSchema: creationOutputSchema,
+    }),
+    defineProviderAction(service, {
+      name: "get_document_creation",
+      operationType: "read",
+      description:
+        "Get a document creation task status and its completed document. Do not repeat creation while the task is processing.",
+      requiredScopes: [feishuDocsProviderScopes.create],
+      providerPermissions: [feishuDocsProviderScopes.create],
+      asyncLifecycle: {
+        startActionId: `${service}.create_document`,
+        statusActionId: `${service}.get_document_creation`,
+      },
+      inputSchema: s.requiredObject("Identify the document creation task.", {
+        taskId: s.nonEmptyString("The task ID returned by create_document."),
+      }),
+      outputSchema: creationOutputSchema,
     }),
     defineProviderAction(service, {
       name: "fetch_document",

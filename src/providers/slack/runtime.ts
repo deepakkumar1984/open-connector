@@ -13,7 +13,7 @@ import {
   optionalStringArray,
   requiredString,
 } from "../../core/cast.ts";
-import { assertPublicHttpUrl, readBoundedResponseBytes } from "../../core/request.ts";
+import { assertPublicHttpUrl, readBoundedResponseBytes, storeResponseInTransit } from "../../core/request.ts";
 import {
   createProviderTimeout,
   defineProviderExecutors,
@@ -159,6 +159,9 @@ export const slackActionHandlers: ProviderActionHandlers<"slack", SlackActionHan
   },
   get_reactions(input, context) {
     return slackGetReactions(input, context);
+  },
+  list_reactions(input, context) {
+    return slackListReactions(input, context);
   },
   upload_file(input, context) {
     return slackUploadFile(input, context);
@@ -725,6 +728,33 @@ async function slackGetReactions(input: Record<string, unknown>, context: SlackA
   };
 }
 
+async function slackListReactions(input: Record<string, unknown>, context: SlackActionContext): Promise<unknown> {
+  const url = slackApiUrl("reactions.list");
+  url.searchParams.set("limit", String(input.limit ?? 100));
+  if (input.userId != null) {
+    url.searchParams.set("user", String(input.userId));
+  }
+  if (input.cursor != null) {
+    url.searchParams.set("cursor", String(input.cursor));
+  }
+  if (typeof input.full === "boolean") {
+    url.searchParams.set("full", String(input.full));
+  }
+
+  const payload = await slackGetJson<SlackPayloadError & { items?: unknown }>(url, context);
+
+  return {
+    items: requireSlackArray(payload.items, "reactions.list items").map((item) => {
+      const record = optionalRecord(item);
+      if (!record) {
+        throw slackResponseError("reactions.list item");
+      }
+      return normalizeSlackReactionItem(record);
+    }),
+    nextCursor: normalizeNextCursor(readSlackNextCursor(payload, "reactions.list")),
+  };
+}
+
 async function slackUploadFile(input: Record<string, unknown>, context: SlackActionContext): Promise<unknown> {
   const content = await resolveSlackFileContent(input, context);
   const filename = String(input.filename);
@@ -855,14 +885,14 @@ async function slackDownloadFile(input: Record<string, unknown>, context: SlackA
       if (mimeType.split(";")[0]?.trim().toLowerCase() === "text/html" && metadata.mimetype !== "text/html") {
         throw providerResponseError("Slack returned an HTML page instead of the requested file");
       }
-      const bytes = await readBoundedResponseBytes(response, {
-        maxBytes: transitFiles.maxBytes,
+      const name = optionalString(metadata.name) ?? fileId;
+      const file = await storeResponseInTransit(response, transitFiles, {
+        name,
+        mimeType,
         fieldName: "Slack file download",
         createError: (message) => new ProviderRequestError(413, message),
+        signal,
       });
-      signal.throwIfAborted();
-      const name = optionalString(metadata.name) ?? fileId;
-      const file = await transitFiles.create(new File([Uint8Array.from(bytes)], name, { type: mimeType }));
       return { fileId, file };
     } finally {
       await response.body?.cancel().catch(() => undefined);
@@ -1313,6 +1343,42 @@ function normalizeSlackReaction(reaction: Record<string, unknown>): Record<strin
     name: optionalString(reaction.name),
     count: optionalInteger(reaction.count),
     userIds: Array.isArray(reaction.users) ? reaction.users.map((user) => String(user)) : undefined,
+  });
+}
+
+/**
+ * Normalize one `reactions.list` item. A message item keeps its conversation,
+ * its permalink and the message as `normalizeSlackMessage` reads it, so the
+ * reactions ride on the message as they do on a history row. A file item
+ * keeps the file ID and the reactions on the file; a file comment item also
+ * keeps the comment ID, and the reactions are the comment's.
+ */
+function normalizeSlackReactionItem(item: Record<string, unknown>): Record<string, unknown> {
+  const type = requireSlackId(item.type, "reactions.list item type");
+  if (type === "message") {
+    const message = requiredResponseRecord(item.message, "reactions.list item message");
+    return compactObject({
+      type,
+      channelId: requireSlackId(item.channel, "reactions.list item channel"),
+      message: normalizeSlackMessage(message),
+      permalink: optionalString(message.permalink),
+    });
+  }
+  if (type !== "file" && type !== "file_comment") {
+    throw slackResponseError("reactions.list item type");
+  }
+
+  const file = requiredResponseRecord(item.file, "reactions.list item file");
+  const comment =
+    type === "file_comment" ? requiredResponseRecord(item.comment, "reactions.list item comment") : undefined;
+  const target = comment ?? file;
+  const reactions = Array.isArray(target.reactions) ? target.reactions : undefined;
+
+  return compactObject({
+    type,
+    fileId: requireSlackId(file.id, "reactions.list item file id"),
+    commentId: comment ? requireSlackId(comment.id, "reactions.list item comment id") : undefined,
+    reactions: reactions?.map((reaction) => normalizeSlackReaction(optionalRecord(reaction) ?? {})),
   });
 }
 

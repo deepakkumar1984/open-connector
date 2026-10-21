@@ -828,6 +828,28 @@ class MemoryConnectionStore implements IConnectionStore {
     return this.connections.get(this.key(service, connectionName));
   }
 
+  private readonly retirementGenerations = new Map<string, string>();
+
+  async getRetirementGeneration(service: string, connectionName: string): Promise<string> {
+    const key = JSON.stringify([service, connectionName]);
+    let generation = this.retirementGenerations.get(key);
+    if (!generation) {
+      generation = crypto.randomUUID();
+      this.retirementGenerations.set(key, generation);
+    }
+    return generation;
+  }
+
+  async setIfCurrentGeneration(
+    service: string,
+    connectionName: string,
+    credential: ResolvedCredential,
+    retirementGeneration: string,
+  ) {
+    if ((await this.getRetirementGeneration(service, connectionName)) !== retirementGeneration) return undefined;
+    return this.set(service, connectionName, credential);
+  }
+
   async set(service: string, connectionName: string, credential: ResolvedCredential) {
     const key = this.key(service, connectionName);
     const connection = {
@@ -850,6 +872,7 @@ class MemoryConnectionStore implements IConnectionStore {
   }
 
   async delete(service: string, connectionName: string): Promise<void> {
+    this.retirementGenerations.set(JSON.stringify([service, connectionName]), crypto.randomUUID());
     this.connections.delete(this.key(service, connectionName));
   }
 

@@ -1475,6 +1475,39 @@ describe("ConnectServer", () => {
     });
   });
 
+  it("documents every /v1 route the app serves", async () => {
+    const app = createTestServer([apiKeyProvider, oauthProvider]).createApp();
+    const document = (await (await app.request("/openapi.json")).json()) as {
+      paths: Record<string, Record<string, unknown>>;
+    };
+
+    // The served document is the SDK/CLI contract for these routes: a route
+    // added without a path entry, or a documented path that no longer exists,
+    // is invisible to every client that reads the document. Operations are read
+    // from the path item itself (excluding its non-operation fields) so the
+    // comparison covers every HTTP method without a method list to maintain.
+    const pathItemFields = new Set(["$ref", "summary", "description", "servers", "parameters"]);
+    const documented = new Set<string>();
+    for (const [path, operations] of Object.entries(document.paths)) {
+      if (!path.startsWith("/v1")) continue;
+      for (const method of Object.keys(operations)) {
+        if (pathItemFields.has(method) || method.startsWith("x-")) continue;
+        documented.add(`${method.toUpperCase()} ${path}`);
+      }
+    }
+
+    const registered = new Set(
+      app.routes
+        .filter((route) => route.method !== "ALL" && route.path.startsWith("/v1"))
+        .map((route) => `${route.method} ${route.path.replaceAll(/:([A-Za-z0-9_]+)/gu, "{$1}")}`),
+    );
+
+    expect(registered.size).toBeGreaterThanOrEqual(20);
+    expect(documented.size).toBeGreaterThanOrEqual(20);
+    expect([...registered].filter((route) => !documented.has(route))).toEqual([]);
+    expect([...documented].filter((route) => !registered.has(route))).toEqual([]);
+  });
+
   it("rejects non-POST MCP requests", async () => {
     const app = createTestServer([apiKeyProvider]).createApp();
 
@@ -1543,59 +1576,63 @@ describe("ConnectServer", () => {
     });
   });
 
-  it("lists OAuth connections after the callback completes", async () => {
-    const app = createTestServer([oauthProvider]).createApp();
-    const config = await app.request("/api/oauth/configs/oauth_example", {
-      method: "PUT",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({
-        clientId: "client-id",
-        clientSecret: "client-secret",
-        secretExtra: {
-          appBearerToken: "app-token",
+  it.each([undefined, 0, 3])(
+    "lists OAuth connections after the callback completes with close delay %s",
+    async (oauthCloseDelaySeconds) => {
+      const app = createTestServer([oauthProvider], { oauthCloseDelaySeconds }).createApp();
+      const config = await app.request("/api/oauth/configs/oauth_example", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          clientId: "client-id",
+          clientSecret: "client-secret",
+          secretExtra: {
+            appBearerToken: "app-token",
+          },
+        }),
+      });
+      expect(config.status).toBe(200);
+      const authorization = await app.request("/api/oauth/authorizations", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ service: "oauth_example" }),
+      });
+      expect(authorization.status).toBe(200);
+      const { state } = (await authorization.json()) as { state: string };
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async () => Response.json({ access_token: "access-token", token_type: "Bearer" })),
+      );
+
+      const callback = await app.request(`/oauth/callback?state=${state}&code=example-code`);
+      const callbackText = await callback.text();
+
+      expect(callback.status, callbackText).toBe(200);
+      expect(callbackText).toContain("BroadcastChannel");
+      expect(callbackText).toContain('"type":"oauth.completed"');
+      expect(callbackText).toContain('"service":"oauth_example"');
+      expect(callbackText).not.toContain("window.opener");
+      expect(callbackText).not.toContain('postMessage(message,"*"');
+      expect(callbackText).toContain("Connection complete");
+      expect(callbackText).toContain("Close this window to continue where you started.");
+      expect(callbackText).not.toContain("OOMOL Connect");
+      expect(callbackText).toContain("card");
+      expect(callbackText).toContain("badge");
+      expect(callbackText).toContain(`Automatically closing in ${oauthCloseDelaySeconds ?? 5} seconds.`);
+      expect(callbackText).toContain(`let remaining=${oauthCloseDelaySeconds ?? 5};`);
+      expect(callbackText).toContain("setTimeout");
+      expect(callbackText).toContain("window.close()");
+      const connections = await app.request("/api/connections");
+      expect(connections.status).toBe(200);
+      await expect(connections.json()).resolves.toMatchObject([
+        {
+          service: "oauth_example",
+          authType: "oauth2",
+          configured: true,
         },
-      }),
-    });
-    expect(config.status).toBe(200);
-    const authorization = await app.request("/api/oauth/authorizations", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ service: "oauth_example" }),
-    });
-    expect(authorization.status).toBe(200);
-    const { state } = (await authorization.json()) as { state: string };
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => Response.json({ access_token: "access-token", token_type: "Bearer" })),
-    );
-
-    const callback = await app.request(`/oauth/callback?state=${state}&code=example-code`);
-    const callbackText = await callback.text();
-
-    expect(callback.status, callbackText).toBe(200);
-    expect(callbackText).toContain("BroadcastChannel");
-    expect(callbackText).toContain('"type":"oauth.completed"');
-    expect(callbackText).toContain('"service":"oauth_example"');
-    expect(callbackText).not.toContain("window.opener");
-    expect(callbackText).not.toContain('postMessage(message,"*"');
-    expect(callbackText).toContain("Connection complete");
-    expect(callbackText).toContain("Close this window to continue where you started.");
-    expect(callbackText).not.toContain("OOMOL Connect");
-    expect(callbackText).toContain("card");
-    expect(callbackText).toContain("badge");
-    expect(callbackText).toContain("Automatically closing in 5 seconds.");
-    expect(callbackText).toContain("setTimeout");
-    expect(callbackText).toContain("window.close()");
-    const connections = await app.request("/api/connections");
-    expect(connections.status).toBe(200);
-    await expect(connections.json()).resolves.toMatchObject([
-      {
-        service: "oauth_example",
-        authType: "oauth2",
-        configured: true,
-      },
-    ]);
-  });
+      ]);
+    },
+  );
 
   it("keeps the console shell public while protecting admin APIs", async () => {
     const staticRoot = await createTestStaticRoot();
@@ -2782,7 +2819,8 @@ describe("ConnectServer", () => {
 
     const providers = await app.request("/v1/providers");
     expect(providers.status).toBe(200);
-    expect(providers.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+    expect(providers.headers.get("cache-control")).toBe("no-store");
+    expect(providers.headers.get("cloudflare-cdn-cache-control")).toBeNull();
     await expect(providers.json()).resolves.toMatchObject({
       success: true,
       data: [
@@ -2797,7 +2835,8 @@ describe("ConnectServer", () => {
 
     const actionServices = await app.request("/v1/actions");
     expect(actionServices.status).toBe(200);
-    expect(actionServices.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+    expect(actionServices.headers.get("cache-control")).toBe("no-store");
+    expect(actionServices.headers.get("cloudflare-cdn-cache-control")).toBeNull();
     await expect(actionServices.json()).resolves.toMatchObject({
       success: true,
       data: [{ service: "example" }],
@@ -2805,7 +2844,8 @@ describe("ConnectServer", () => {
 
     const actions = await app.request("/v1/actions?service=example");
     expect(actions.status).toBe(200);
-    expect(actions.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+    expect(actions.headers.get("cache-control")).toBe("no-store");
+    expect(actions.headers.get("cloudflare-cdn-cache-control")).toBeNull();
     await expect(actions.json()).resolves.toMatchObject({
       success: true,
       data: [
@@ -2873,7 +2913,8 @@ describe("ConnectServer", () => {
 
     const action = await app.request("/v1/actions/example.echo");
     expect(action.status).toBe(200);
-    expect(action.headers.get("cache-control")).toBe("public, max-age=0, must-revalidate");
+    expect(action.headers.get("cache-control")).toBe("no-store");
+    expect(action.headers.get("cloudflare-cdn-cache-control")).toBeNull();
     await expect(action.json()).resolves.toMatchObject({
       success: true,
       meta: {},
@@ -2904,6 +2945,22 @@ describe("ConnectServer", () => {
         actionId: "example.echo",
       },
     });
+  });
+
+  it.each(["/api", "/v1"])("enforces search limit boundaries on %s", async (prefix) => {
+    const app = createTestServer([{ ...apiKeyProvider, actions: [echoAction] }]).createApp();
+
+    const accepted = await app.request(`${prefix}/actions/search?q=echo&limit=50`);
+    expect(accepted.status).toBe(200);
+
+    const rejected = await app.request(`${prefix}/actions/search?q=echo&limit=51`);
+    expect(rejected.status).toBe(400);
+    const message = "limit must be an integer between 1 and 50.";
+    await expect(rejected.json()).resolves.toMatchObject(
+      prefix === "/api"
+        ? { error: { code: "invalid_input", message } }
+        : { success: false, errorCode: "invalid_input", message },
+    );
   });
 
   it("drops stale action search index hits that are missing from the catalog", async () => {
@@ -3895,6 +3952,7 @@ interface CreateTestServerOptions {
   uploadTransitFile?: (request: Request) => Promise<TransitFileUpload>;
   secretCodec?: ISecretCodec;
   allowedCustomOAuth?: string[];
+  oauthCloseDelaySeconds?: number;
 }
 
 function createTestServer(providers: ProviderDefinition[], options: CreateTestServerOptions = {}): ConnectServer {
@@ -3973,6 +4031,7 @@ function createTestServer(providers: ProviderDefinition[], options: CreateTestSe
     actionPolicy: options.actionPolicy,
     actionSearch: options.actionSearch,
     logger: options.logger,
+    oauthCloseDelaySeconds: options.oauthCloseDelaySeconds,
   });
 }
 
@@ -4169,6 +4228,28 @@ class MemoryConnectionStore implements IConnectionStore {
     return this.store.get(createConnectionKey(service, connectionName));
   }
 
+  private readonly retirementGenerations = new Map<string, string>();
+
+  async getRetirementGeneration(service: string, connectionName: string): Promise<string> {
+    const key = JSON.stringify([service, connectionName]);
+    let generation = this.retirementGenerations.get(key);
+    if (!generation) {
+      generation = crypto.randomUUID();
+      this.retirementGenerations.set(key, generation);
+    }
+    return generation;
+  }
+
+  async setIfCurrentGeneration(
+    service: string,
+    connectionName: string,
+    credential: ResolvedCredential,
+    retirementGeneration: string,
+  ) {
+    if ((await this.getRetirementGeneration(service, connectionName)) !== retirementGeneration) return undefined;
+    return this.set(service, connectionName, credential);
+  }
+
   async set(service: string, connectionName: string, credential: ResolvedCredential) {
     const key = createConnectionKey(service, connectionName);
     const connection = {
@@ -4191,6 +4272,7 @@ class MemoryConnectionStore implements IConnectionStore {
   }
 
   async delete(service: string, connectionName: string): Promise<void> {
+    this.retirementGenerations.set(JSON.stringify([service, connectionName]), crypto.randomUUID());
     this.store.delete(createConnectionKey(service, connectionName));
   }
 

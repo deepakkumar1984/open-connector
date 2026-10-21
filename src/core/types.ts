@@ -366,6 +366,8 @@ export interface TransitFileStore {
   /** Available only on backends that can store unknown-length streams without buffering the file. */
   createFromStream?(file: TransitFileStream): Promise<TransitFileUpload>;
   read(fileId: string): Promise<TransitFileRead>;
+  /** Stream a stored file for provider uploads without materializing its bytes. */
+  response?(fileId: string): Promise<Response>;
   delete(fileId: string): Promise<boolean>;
 }
 

@@ -104,10 +104,9 @@ async function listNodes(input: Record<string, unknown>, request: FeishuJsonRequ
 
 async function getNode(input: Record<string, unknown>, request: FeishuJsonRequest) {
   const data = await request({
-    path: "/wiki/v2/spaces/get_node",
+    path: "/wiki/v2/spaces/node_by_token",
     query: {
       token: requiredString(input.token, "token"),
-      obj_type: optionalString(input.objectType),
     },
   });
   return { item: recordValue(data.node) };

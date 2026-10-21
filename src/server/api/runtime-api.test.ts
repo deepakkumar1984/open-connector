@@ -3,9 +3,9 @@ import type { RuntimeActionHttpResult } from "./runtime-api.ts";
 
 import { Hono } from "hono";
 import { describe, expect, it } from "vitest";
+import { providerErrorCodes } from "../../core/provider-error-codes.ts";
 import {
   parseRuntimeActionHttpResult,
-  providerErrorCodes,
   serializeRuntimeAction,
   serializeRuntimeActionResult,
   serializeRuntimeConnectedApp,
@@ -133,6 +133,8 @@ describe("runtime action HTTP results", () => {
     ["provider_error", 500],
     ["internal_error", 500],
     ["oauth_token_expired", 409],
+    ["oauth_token_refresh_failed", 409],
+    ["oauth_reauth_required", 409],
     ["invalid_input", 400],
   ] as const)("maps %s execution failures to status %i", (code, status) => {
     expect(

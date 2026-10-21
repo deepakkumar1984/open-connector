@@ -36,6 +36,8 @@ export interface ConnectionSummary {
   connectionName: string;
   authType: AuthType | "marketplace";
   configured: boolean;
+  /** Known credential state; token expiry alone does not require new consent when refresh is available. */
+  status?: "active" | "reauth_required";
   virtual: boolean;
   default: boolean;
   profile: CredentialProfile;
@@ -148,6 +150,13 @@ interface SaasExecutionConnection {
  */
 export interface IConnectionStore {
   get(service: string, connectionName: string): Promise<StoredConnection | undefined>;
+  getRetirementGeneration(service: string, connectionName: string): Promise<string>;
+  setIfCurrentGeneration(
+    service: string,
+    connectionName: string,
+    credential: ResolvedCredential,
+    retirementGeneration: string,
+  ): Promise<StoredLocalConnection | undefined>;
   set(service: string, connectionName: string, credential: ResolvedCredential): Promise<StoredLocalConnection>;
   updateCredential(input: StoredLocalConnection, refresh?: boolean): Promise<boolean>;
   delete(service: string, connectionName: string): Promise<void>;
@@ -175,6 +184,35 @@ interface PreviousCredentialRuntimeData {
 
 type CredentialValidatorCall = () => Promise<CredentialValidationResult | void> | undefined;
 type OAuthCredential = Extract<ResolvedCredential, { authType: "oauth2" }>;
+
+const OAUTH_REFRESH_PERSIST_ATTEMPTS = 3;
+
+/**
+ * Lays a refresh result onto the connection's current credential. A refresh owns the token
+ * fields and the metadata keys it changed; everything else on `current` belongs to whoever
+ * bumped the revision and is kept.
+ */
+function mergeRefreshedOAuthCredential(
+  current: OAuthCredential,
+  spent: OAuthCredential,
+  refreshed: OAuthCredential,
+): OAuthCredential {
+  const metadata = { ...current.metadata };
+  for (const [key, value] of Object.entries(refreshed.metadata)) {
+    if (JSON.stringify(value) !== JSON.stringify(spent.metadata[key])) metadata[key] = value;
+  }
+  // A successful refresh proves the authorization is live, so a concurrent refusal's mark is stale.
+  delete metadata.oauthReauthRequired;
+  return {
+    ...current,
+    accessToken: refreshed.accessToken,
+    tokenType: refreshed.tokenType,
+    expiresAt: refreshed.expiresAt,
+    refreshToken: refreshed.refreshToken,
+    providerSecret: refreshed.providerSecret,
+    metadata,
+  };
+}
 
 /**
  * Coordinates local provider connection state.
@@ -449,16 +487,25 @@ export class ConnectionService {
     credential: Extract<ResolvedCredential, { authType: "oauth2" }>,
     connectionNameInput?: string,
     signal?: AbortSignal,
+    retirementGeneration?: string,
   ): Promise<ConnectionSummary> {
-    const storedCredential = await this.prepareOAuthCredential(service, credential, signal);
     const connectionName = normalizeConnectionName(connectionNameInput);
-    const stored = await this.store.set(service, connectionName, storedCredential);
+    const generation = retirementGeneration ?? (await this.store.getRetirementGeneration(service, connectionName));
+    const storedCredential = await this.prepareOAuthCredential(service, credential, signal);
+    const stored = await this.store.setIfCurrentGeneration(service, connectionName, storedCredential, generation);
+    if (!stored)
+      throw new ConnectionError("connection_retired", "The connection was disconnected during authorization.");
     return this.createStoredConnectionSummary(
       this.getAvailableProvider(service),
       stored.id,
       connectionName,
       storedCredential,
     );
+  }
+
+  /** Capture the durable disconnect fence before sending the user to the provider. */
+  async getRetirementGeneration(service: string, connectionName?: string): Promise<string> {
+    return this.store.getRetirementGeneration(service, normalizeConnectionName(connectionName));
   }
 
   async prepareOAuthCredential(
@@ -528,10 +575,7 @@ export class ConnectionService {
       };
     const credential = stored.credential;
     return {
-      status:
-        credential.authType === "oauth2" && !credential.refreshToken && isOAuthCredentialExpired(credential)
-          ? "reauth_required"
-          : "active",
+      status: "active",
       ...this.createConfiguredConnectionSummary(
         this.getProvider(stored.service),
         stored.id,
@@ -677,6 +721,12 @@ export class ConnectionService {
       connectionName,
       authType: credential.authType,
       configured: true,
+      status:
+        credential.authType === "oauth2" &&
+        (credential.metadata.oauthReauthRequired === true ||
+          (!credential.refreshToken && isOAuthCredentialExpired(credential)))
+          ? "reauth_required"
+          : "active",
       virtual: false,
       default: connectionName === defaultConnectionName,
       profile: credential.profile,
@@ -839,6 +889,12 @@ export class ConnectionService {
     credential: OAuthCredential,
   ): Promise<OAuthCredential> {
     const service = connection.service;
+    if (credential.metadata.oauthReauthRequired === true) {
+      throw new ConnectionError(
+        "oauth_reauth_required",
+        `OAuth authorization is no longer valid. Reconnect ${service}.`,
+      );
+    }
     if (!isOAuthCredentialExpired(credential)) {
       return credential;
     }
@@ -857,7 +913,15 @@ export class ConnectionService {
       );
     }
 
-    const refreshKey = `${connection.id}:${connection.revision}`;
+    // Single-flight on the refresh token being spent, not the row revision: a single-use
+    // (rotating) refresh token must reach the provider once even when an unrelated write
+    // bumps the revision mid-refresh. A new authorization must refresh independently,
+    // even when the provider reuses the same refresh token across reconnects.
+    const refreshKey = JSON.stringify([
+      connection.id,
+      credential.refreshToken,
+      credential.metadata.oauthAuthorizationId,
+    ]);
     const currentRefresh = this.oauthCredentialRefreshes.get(refreshKey);
     if (currentRefresh) {
       return currentRefresh;
@@ -880,28 +944,56 @@ export class ConnectionService {
     refresher: IOAuthCredentialRefresher,
   ): Promise<OAuthCredential> {
     const { id, revision, service, connectionName } = connection;
-    const nextCredential = await withProviderHttpDispatchResult(
-      { operation: "oauth", service, connectionId: id, connectionName },
-      () => refresher.refresh(service, credential),
-      this.providerHttpDispatch,
-    );
-    const updated = await this.store.updateCredential(
-      {
-        id,
-        revision,
-        service,
-        connectionName,
-        credential: nextCredential,
-      },
-      true,
-    );
-    if (!updated) {
-      throw new ConnectionError(
-        "connection_not_found",
-        `${service} connection changed while its OAuth credential was refreshing. Retry the action.`,
+    let nextCredential: OAuthCredential;
+    try {
+      nextCredential = await withProviderHttpDispatchResult(
+        { operation: "oauth", service, connectionId: id, connectionName },
+        () => refresher.refresh(service, credential),
+        this.providerHttpDispatch,
       );
+    } catch (error) {
+      if (error instanceof ConnectionError && error.code === "oauth_reauth_required") {
+        // The revision fence prevents a late refusal from marking a replacement authorization as expired.
+        await this.store.updateCredential(
+          {
+            id,
+            revision,
+            service,
+            connectionName,
+            credential: { ...credential, metadata: { ...credential.metadata, oauthReauthRequired: true } },
+          },
+          true,
+        );
+      }
+      throw error;
     }
-    return nextCredential;
+    // The provider has now spent the old refresh token. With rotating single-use refresh
+    // tokens, discarding `nextCredential` loses the connection for good, so a lost
+    // revision race re-reads the row and lands the refreshed token fields on the latest
+    // revision, as long as that row still holds the credential this refresh spent.
+    let target: StoredLocalConnection = { ...connection, source: "local", credential: nextCredential };
+    for (let attempt = 0; attempt < OAUTH_REFRESH_PERSIST_ATTEMPTS; attempt++) {
+      if (await this.store.updateCredential(target, true)) return target.credential as OAuthCredential;
+      const current = await this.store.get(service, connectionName);
+      if (
+        current?.source === "saas" ||
+        current?.id !== id ||
+        current.credential.authType !== "oauth2" ||
+        current.credential.refreshToken !== credential.refreshToken ||
+        current.credential.metadata.oauthAuthorizationId !== credential.metadata.oauthAuthorizationId
+      ) {
+        // Deleted, converted, reconnected, or already rotated elsewhere: never overwrite it.
+        break;
+      }
+      target = {
+        ...current,
+        credential: mergeRefreshedOAuthCredential(current.credential, credential, nextCredential),
+      };
+    }
+    throw new ConnectionError(
+      "connection_not_found",
+      `${service} connection changed while its OAuth credential was refreshing. Retry the action.`,
+    );
   }
 
   private async runCredentialValidator(

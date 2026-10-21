@@ -5,7 +5,6 @@ import type {
   StoredMarketplaceConfig,
 } from "../../../marketplace/marketplace-service.ts";
 import type { IOAuthClientConfigStore, OAuthClientConfig } from "../../../oauth/oauth-client-config-service.ts";
-import type { IOAuthStateStore, OAuthAuthorizationState } from "../../../oauth/oauth-flow-service.ts";
 import type { D1DatabaseBinding } from "../../cloudflare/cloudflare-bindings.ts";
 import type { ISecretCodec } from "../../secrets/secret-codec-core.ts";
 import type { RequestTransaction } from "../connection-request-store.ts";
@@ -25,6 +24,7 @@ import { parseRuntimeActionHttpResult } from "../../api/runtime-api.ts";
 import { PlainTextSecretCodec } from "../../secrets/secret-codec-core.ts";
 import { ConnectionRequestStore } from "../connection-request-store.ts";
 import { SqlConnectionStore } from "../connection-store.ts";
+import { SqlOAuthStateStore } from "../oauth-state-store.ts";
 import {
   listRunLogs,
   parseJson,
@@ -51,7 +51,7 @@ export class D1RuntimeDatabase implements RuntimeDatabase {
   readonly connectionStore: SqlConnectionStore;
   readonly triggerStore: SqlTriggerStore;
   readonly oauthClientConfigStore: D1OAuthClientConfigStore;
-  readonly oauthStateStore: D1OAuthStateStore;
+  readonly oauthStateStore: SqlOAuthStateStore;
   readonly runtimeTokenStore: D1RuntimeTokenStore;
   readonly runtimePolicyStore: D1RuntimePolicyStore;
   readonly runLogStore: D1RunLogStore;
@@ -69,7 +69,7 @@ export class D1RuntimeDatabase implements RuntimeDatabase {
     this.triggerStore = new SqlTriggerStore(transaction, secretCodec);
     this.saasProjectStore = new SaasProjectStore(transaction, secretCodec);
     this.oauthClientConfigStore = new D1OAuthClientConfigStore(database, secretCodec);
-    this.oauthStateStore = new D1OAuthStateStore(database, secretCodec);
+    this.oauthStateStore = new SqlOAuthStateStore(transaction, secretCodec);
     this.runtimeTokenStore = new D1RuntimeTokenStore(database);
     this.runtimePolicyStore = new D1RuntimePolicyStore(database);
     this.runLogStore = new D1RunLogStore(database, options.runLimit ?? DEFAULT_RUN_LIMIT);
@@ -162,43 +162,6 @@ export class D1OAuthClientConfigStore implements IOAuthClientConfigStore {
     return await Promise.all(
       results.map(async (row) => parseJson<OAuthClientConfig>(await this.secretCodec.decode(readString(row, "value")))),
     );
-  }
-}
-
-export class D1OAuthStateStore implements IOAuthStateStore {
-  private readonly database: D1DatabaseBinding;
-  private readonly secretCodec: ISecretCodec;
-
-  constructor(database: D1DatabaseBinding, secretCodec: ISecretCodec) {
-    this.database = database;
-    this.secretCodec = secretCodec;
-  }
-
-  async deleteCreatedBefore(cutoff: string): Promise<void> {
-    await this.database.prepare("delete from oauth_states where created_at < ?").bind(cutoff).run();
-  }
-
-  async set(state: OAuthAuthorizationState): Promise<void> {
-    await this.database
-      .prepare(
-        `
-        insert into oauth_states (state, value, created_at)
-        values (?, ?, ?)
-        on conflict(state) do update set value = excluded.value, created_at = excluded.created_at
-      `,
-      )
-      .bind(state.state, await this.secretCodec.encode(JSON.stringify(state)), state.createdAt)
-      .run();
-  }
-
-  async take(state: string): Promise<OAuthAuthorizationState | undefined> {
-    const row = await this.database
-      .prepare("delete from oauth_states where state = ? returning value")
-      .bind(state)
-      .first<RuntimeRow>();
-    return row
-      ? parseJson<OAuthAuthorizationState>(await this.secretCodec.decode(readString(row, "value")))
-      : undefined;
   }
 }
 
@@ -331,28 +294,38 @@ export class D1IdempotencyStore implements IIdempotencyStore {
   }
 
   async claim(input: IdempotencyClaimInput): Promise<IdempotencyClaimResult> {
-    await this.database.prepare("delete from idempotency_records where expires_at <= ?").bind(input.now).run();
-
-    const inserted = await this.database
-      .prepare(
-        `
-        insert into idempotency_records (
-          key_hash, claim_id, request_hash, state, response_value, created_at, expires_at
+    // D1 batches run in a single transaction, so the delete, insert, and select
+    // behave like the SQLite and PostgreSQL claim, which wrap the same three
+    // statements in one transaction. Issued separately, a concurrent claim's
+    // expiry sweep can remove the competing row between the insert conflict and
+    // the select, and the claim failed with an internal error instead of the
+    // stored in_progress, conflict, or completed result.
+    const results = await this.database.batch([
+      this.database.prepare("delete from idempotency_records where expires_at <= ?").bind(input.now),
+      this.database
+        .prepare(
+          `
+          insert into idempotency_records (
+            key_hash, claim_id, request_hash, state, response_value, created_at, expires_at
+          )
+          values (?, ?, ?, 'in_progress', null, ?, ?)
+          on conflict(key_hash) do nothing
+          returning claim_id
+        `,
         )
-        values (?, ?, ?, 'in_progress', null, ?, ?)
-        on conflict(key_hash) do nothing
-      `,
-      )
-      .bind(input.keyHash, input.claimId, input.requestHash, input.now, input.expiresAt)
-      .run();
-    if ((inserted.meta.changes ?? 0) > 0) {
+        .bind(input.keyHash, input.claimId, input.requestHash, input.now, input.expiresAt),
+      this.database
+        .prepare("select request_hash, state, response_value from idempotency_records where key_hash = ?")
+        .bind(input.keyHash),
+    ]);
+
+    // Only this claim's insert returns a row; a conflicting insert returns none
+    // and leaves the existing record to the select, exactly like the row count
+    // the other backends read from their insert.
+    if ((results[1]?.results?.length ?? 0) > 0) {
       return { kind: "acquired" };
     }
-
-    const row = await this.database
-      .prepare("select request_hash, state, response_value from idempotency_records where key_hash = ?")
-      .bind(input.keyHash)
-      .first<RuntimeRow>();
+    const row = results[2]?.results?.[0];
     if (!row) {
       throw new Error("Idempotency record disappeared while claiming it.");
     }

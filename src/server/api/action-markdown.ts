@@ -8,6 +8,7 @@ import { gfmFromMarkdown, gfmToMarkdown } from "mdast-util-gfm";
 import { toMarkdown } from "mdast-util-to-markdown";
 import { gfm } from "micromark-extension-gfm";
 import { describeSchemaType, readSchemaProperties, readSchemaRequired } from "../../core/json-schema.ts";
+import { buildExampleInput } from "./action-example.ts";
 
 /** HTTP callers get request examples against the runtime's public origin. */
 interface HttpActionGuideTransport {
@@ -312,43 +313,6 @@ function isBlockContent(node: DocumentContent): node is BlockContent {
 
 type DocumentContent = BlockContent | DefinitionContent;
 
-function buildExampleInput(schema: JsonSchema): Record<string, unknown> {
-  const properties = readSchemaProperties(schema);
-  const input: Record<string, unknown> = {};
-  for (const name of readSchemaRequired(schema)) {
-    input[name] = exampleValue(properties[name]);
-  }
-  return input;
-}
-
 function readDescription(schema: JsonSchema | undefined): string {
   return schema && typeof schema.description === "string" ? schema.description : "";
-}
-
-function exampleValue(schema: JsonSchema | undefined): unknown {
-  if (!schema) {
-    return "";
-  }
-  if (schema.default !== undefined) {
-    return schema.default;
-  }
-  if (schema.const !== undefined) {
-    return schema.const;
-  }
-  if (Array.isArray(schema.enum)) {
-    return schema.enum[0];
-  }
-  if (schema.type === "integer" || schema.type === "number") {
-    return 1;
-  }
-  if (schema.type === "boolean") {
-    return false;
-  }
-  if (schema.type === "array") {
-    return [];
-  }
-  if (schema.type === "object") {
-    return {};
-  }
-  return "";
 }
