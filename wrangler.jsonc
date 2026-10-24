@@ -4,6 +4,10 @@
   "main": "src/server/cloudflare.ts",
   "compatibility_date": "2026-07-02",
   "compatibility_flags": ["nodejs_compat"],
+  // Wrangler defaults upload_source_maps to true for deploy. This Worker's bundle
+  // encodes to ~64 MiB of sourcemaps, over Cloudflare's 60 MiB limit (error 10021),
+  // so deploys must skip them. Local `wrangler dev` sourcemaps are unaffected.
+  "upload_source_maps": false,
   // The custom domain is managed in the Cloudflare dashboard. Declare it here so
   // `wrangler deploy` keeps it instead of detaching it: a route missing from the
   // local config is treated as a removal. workers_dev/preview_urls are explicit
