@@ -28,7 +28,7 @@ Verify each of these after resolving conflicts. If one is missing, the merge is 
 | Custom connection aliases     | `src/server/api/connection-input.ts`, `connection-routes.ts`, `oauth-flow-service.ts`, `docs/programmatic-connections.md`                                     | Optional `connectionName` on OAuth, API-key, and custom-credential requests                                                                                                                             |
 | OAuth callback correlation    | `src/oauth/oauth-flow-service.ts` (`CallbackReturnUriSource`, `callbackReturnUri`)                                                                            | `connectionRequestId` always, `appId` on success, in the `returnUri` redirect                                                                                                                           |
 | Health identity               | `src/server/connect-server.ts`                                                                                                                                | `GET /v1/health` reports `runtime: "connectors"`                                                                                                                                                        |
-| Deploy scripts                | `package.json`                                                                                                                                                | `build:web` uses `npm --prefix web run build`; keep `deploy:cloudflare` and `deploy:cloudflare:preview`                                                                                                 |
+| Deploy scripts                | `package.json`                                                                                                                                                | `build:web` uses `npm --prefix web run build`; keep the single `deploy` script targeting `wrangler.local.jsonc` (the fork intentionally dropped `deploy:cloudflare:preview`)                            |
 | Local env ignore              | `.gitignore`                                                                                                                                                  | `.dev.vars` / `.dev.vars.*` ignored except `.dev.vars.example`                                                                                                                                          |
 | Secret-scanner allows         | `src/providers/la_growth_machine/actions.ts`, `src/providers/uniswap_api/runtime.ts`                                                                          | `// gitleaks:allow` annotations on public field/address fixtures                                                                                                                                        |
 
@@ -69,8 +69,9 @@ canonical for the scripts in this repository.
   `createConnectApp`: at minimum `connectionEvents: options.connectionEvents` and
   `network: options.network`.
 - `package.json` — upstream normally leaves it alone; when it does change, keep upstream's
-  dependency versions and re-apply the fork's three script lines from the table above. Do not
-  accept an upstream `deploy` script that replaces `deploy:cloudflare`.
+  dependency versions and re-apply the fork's script lines from the table above. The fork
+  deliberately consolidates Cloudflare deploys under one `deploy` script and does not ship a
+  separate preview deploy script; preserve that shape rather than restoring the old names.
 - `src/oauth/oauth-flow-service.ts`, `src/server/api/connection-routes.ts`,
   `src/server/cloudflare.ts`, `src/server/connect-app.ts` — these usually auto-merge. Confirm the
   event dispatcher, `connectionName`, `appId`/`connectionRequestId`, gate calls, and
@@ -87,7 +88,7 @@ grep -n "connectionEvents" src/server/connect-app.ts src/server/connector-runtim
 grep -n "connectionName" src/server/api/connection-input.ts src/server/api/connection-routes.ts
 grep -n "connectionRequestId\|appId" src/oauth/oauth-flow-service.ts
 grep -n 'runtime: "connectors"' src/server/connect-server.ts
-node -e 'const p=require("./package.json").scripts; console.log(p["build:web"], p["deploy:cloudflare"], p["deploy:cloudflare:preview"])'
+node -e 'const p=require("./package.json").scripts; console.log(p["build:web"], p["deploy"])'
 ```
 
 All must print matches. Then run `npm run fix-check`, `node scripts/check-action-examples.ts`,
@@ -96,9 +97,9 @@ and `npm test`.
 ## Pitfalls
 
 - **Files can be rewritten outside the merge.** A running editor, task, or dependency updater
-  may rewrite `package.json` and `bun.lock` mid-run. Symptoms: the fork's deploy scripts vanish,
-  dependency versions change, or tests fail with `package.json ... File is empty`. Restore the
-  known-good copy (`git checkout -- package.json bun.lock` during a merge, or
+  may rewrite `package.json` and `bun.lock` mid-run. Symptoms: the `deploy` script is renamed or
+  replaced, dependency versions change, or tests fail with `package.json ... File is empty`.
+  Restore the known-good copy (`git checkout -- package.json bun.lock` during a merge, or
   `git show HEAD:package.json > package.json` after one) and re-run the suite.
 - `run_worker_first: true` is required. The array form lets Static Assets serve `/` and the
   console SPA before the Worker runs, bypassing concealment.
