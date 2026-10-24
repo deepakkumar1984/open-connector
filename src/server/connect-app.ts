@@ -1,6 +1,7 @@
 import type { CatalogStore } from "../catalog-store.ts";
 import type { ActionPolicyService } from "../core/action-policy.ts";
 import type { ProviderHttpDispatchOptions } from "../core/provider-http-dispatch.ts";
+import type { ProviderNetworkPolicy } from "../core/provider-network-policy.ts";
 import type { RuntimeLogger, TransitFileUpload } from "../core/types.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { RuntimeJwtVerifier } from "./api/runtime-jwt.ts";
@@ -12,6 +13,7 @@ import type { Hono } from "hono";
 
 import { ConnectionService } from "../connection-service.ts";
 import { ActionPolicyService as ExecutionPolicyService } from "../core/action-policy.ts";
+import { withProviderNetworkPolicy } from "../core/provider-network-policy.ts";
 import { MarketplaceService } from "../marketplace/marketplace-service.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthCredentialRefreshService } from "../oauth/oauth-credential-refresh-service.ts";
@@ -24,10 +26,12 @@ import { SaasProjectService } from "../saas/saas-project-service.ts";
 import { TriggerMaintenance } from "../triggers/maintenance.ts";
 import { TriggerRunner } from "../triggers/trigger-runner.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
+import { normalizeOAuthResultOrigins } from "./api/oauth-completion-page.ts";
 import { ConnectServer } from "./connect-server.ts";
 import { RuntimeTokenService } from "./storage/runtime-token-service.ts";
 
 export interface ConnectAppOptions {
+  network?: ProviderNetworkPolicy;
   catalog: CatalogStore;
   providerLoader: IProviderLoader;
   providerHttpDispatch?: ProviderHttpDispatchOptions;
@@ -39,6 +43,7 @@ export interface ConnectAppOptions {
   secretCodec: ISecretCodec;
   adminToken?: string;
   runtimeToken?: string;
+  eventVerifyToken?: string;
   requireRuntimeAuth?: boolean;
   allowedCustomOAuth?: string[];
   verifyRuntimeJwt?: RuntimeJwtVerifier;
@@ -50,6 +55,7 @@ export interface ConnectAppOptions {
   compressApiResponses?: boolean;
   serveDocumentation?: boolean;
   oauthCloseDelaySeconds?: number;
+  oauthResultOrigins?: string[];
 }
 
 export interface ConnectApp {
@@ -60,6 +66,10 @@ export interface ConnectApp {
 }
 
 export async function createConnectApp(options: ConnectAppOptions): Promise<ConnectApp> {
+  const network = Object.freeze({
+    allowPrivateNetwork: options.network?.allowPrivateNetwork ?? false,
+    trustedHosts: Object.freeze([...(options.network?.trustedHosts ?? [])]),
+  });
   const saasClient = new SaasClient();
   const saasProject = new SaasProjectService({
     catalog: options.catalog,
@@ -79,7 +89,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
     store: options.runtimeDatabase.marketplaceStore,
     secretCodec: options.secretCodec,
   });
-  await marketplace.initialize();
+  await withProviderNetworkPolicy(network, () => marketplace.initialize());
   const runtimeTokens = new RuntimeTokenService(options.runtimeDatabase.runtimeTokenStore, options.logger);
   const hasStoredRuntimeTokens = async (): Promise<boolean> => (await runtimeTokens.listTokens()).length > 0;
   const allowedCustomOAuth = new Set(options.allowedCustomOAuth);
@@ -121,6 +131,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
     store: options.runtimeDatabase.triggerStore,
   });
   const triggerMaintenance = new TriggerMaintenance({
+    network,
     store: options.runtimeDatabase.triggerStore,
     runner: triggers,
     tokens: options.runtimeDatabase.runtimeTokenStore,
@@ -131,12 +142,14 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
   return {
     triggerMaintenance,
     saasCleanup: new SaasCleanupService({
+      network,
       store: options.runtimeDatabase.saasProjectStore,
       requests: options.runtimeDatabase.connectionRequestStore,
       client: saasClient,
       logger: options.logger,
     }),
     app: new ConnectServer({
+      network,
       providerHttpDispatch: options.providerHttpDispatch,
       catalog: options.catalog,
       publicOrigin: options.publicOrigin,
@@ -163,6 +176,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
       runtimeTokens,
       runtimePolicyStore: options.runtimeDatabase.runtimePolicyStore,
       registerStaticRoutes: options.registerStaticRoutes,
+      eventVerifyToken: options.eventVerifyToken,
       auth: {
         adminToken: options.adminToken,
         runtimeToken: options.runtimeToken,
@@ -180,6 +194,9 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
       compressApiResponses: options.compressApiResponses,
       serveDocumentation: options.serveDocumentation,
       oauthCloseDelaySeconds: options.oauthCloseDelaySeconds,
+      // Validated here as well as where the environment is read, so a host
+      // that passes the option directly gets the same refusal of `*`.
+      oauthResultOrigins: normalizeOAuthResultOrigins(options.oauthResultOrigins ?? []),
     }).createApp(),
     runtimeAuthConfigured:
       Boolean(options.requireRuntimeAuth) ||

@@ -1,5 +1,6 @@
 import type { ProviderErrorCode } from "../core/provider-error-codes.ts";
 import type { ProviderDispatchContext, ProviderHttpDispatchOptions } from "../core/provider-http-dispatch.ts";
+import type { ProviderNetworkPolicy } from "../core/provider-network-policy.ts";
 import type {
   ActionExecutor,
   ExecutionContext,
@@ -38,9 +39,11 @@ import { readBoundedResponseBytes } from "../core/request.ts";
 export type ProviderFetch = typeof fetch;
 
 export interface ProviderFetchOptions {
+  /** Bind runtime policy; private targets still require the transport's allowPrivateNetwork opt-in. */
+  network?: ProviderNetworkPolicy;
   /** Base transport; defaults to the global fetch. A guarded fetch is unwrapped so guards never stack. */
   fetch?: ProviderFetch;
-  /** Allow private-network targets for this provider's egress (see `assertPublicHttpUrl`); default public-only. */
+  /** Opt into runtime private-network permission with isPrivateNetworkAccessAllowed; omitted keeps targets public-only. */
   allowPrivateNetwork?: () => boolean;
   /**
    * Skip the DNS resolved-address check (URL and redirect guards still apply).
@@ -60,6 +63,7 @@ export interface ProviderFetchOptions {
  */
 export function createProviderFetch(options: ProviderFetchOptions = {}): ProviderFetch {
   return createGuardedFetch({
+    network: options.network,
     dispatchAttempt: async (attempt, signal, transport, revalidate) => {
       try {
         return await dispatchProviderHttpAttempt(attempt, signal, transport, revalidate);
@@ -459,7 +463,8 @@ const blockedProxyRequestHeaders = new Set([
 const defaultProviderProxyMaxResponseBytes = 20 * 1024 * 1024;
 export const defaultProviderJsonMaxResponseBytes: number = 20 * 1024 * 1024;
 const defaultProviderErrorMaxResponseBytes = 64 * 1024;
-const defaultProviderRequestTimeoutMs = 30_000;
+/** Shared request budget for native AbortSignal and SDK timeout APIs. */
+export const defaultProviderRequestTimeoutMs = 30_000;
 
 export function createProviderProxyUrl(
   baseUrl: string,
@@ -584,7 +589,7 @@ export async function readProviderProxyResponse(
     createError: (message) => new ProviderRequestError(413, message),
   });
   const contentType = response.headers.get("content-type") ?? "";
-  const normalizedContentType = contentType.toLowerCase();
+  const normalizedContentType = contentType.split(";", 1)[0]!.trim().toLowerCase();
   if (bytes.byteLength === 0) {
     return {
       status: response.status,
@@ -592,7 +597,18 @@ export async function readProviderProxyResponse(
       data: null,
     };
   }
-  if (normalizedContentType.includes("json")) {
+  if (!normalizedContentType) {
+    try {
+      return {
+        status: response.status,
+        headers,
+        data: new TextDecoder("utf-8", { fatal: true }).decode(bytes),
+      };
+    } catch {
+      // Preserve invalid UTF-8 bytes through the base64 fallback.
+    }
+  }
+  if (normalizedContentType === "application/json" || normalizedContentType.endsWith("+json")) {
     return {
       status: response.status,
       headers,
@@ -630,6 +646,7 @@ function isTextProxyContentType(contentType: string): boolean {
   const normalized = contentType.split(";", 1)[0]!.trim().toLowerCase();
   return (
     normalized.startsWith("text/") ||
+    normalized === "application/x-ndjson" ||
     normalized === "application/xml" ||
     normalized === "application/xml-external-parsed-entity" ||
     normalized === "application/xml-dtd" ||
@@ -1244,6 +1261,38 @@ export function parseProviderJsonBodyText(text: string, options: ReadProviderJso
   }
 }
 
+interface UploadSourceInput {
+  url: string;
+  fetcher: typeof fetch;
+  fieldName: string;
+  maximumBytes?: number;
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
+/** Download an upload source through public-only egress with a bounded body. */
+export async function downloadUploadSource(
+  input: UploadSourceInput,
+): Promise<{ bytes: Uint8Array; contentType?: string }> {
+  return runProviderRequest(
+    { label: input.fieldName, timeoutMs: input.timeoutMs ?? 15_000, signal: input.signal },
+    async (signal) => {
+      const response = await createProviderFetch({ fetch: input.fetcher })(input.url, { signal });
+      if (!response.ok) {
+        void response.body?.cancel().catch(() => undefined);
+        throw providerInputError(`${input.fieldName} download failed with HTTP ${response.status}`);
+      }
+      const bytes = await readBoundedResponseBytes(response, {
+        maxBytes: input.maximumBytes ?? 20 * 1024 * 1024,
+        fieldName: input.fieldName,
+        createError: providerInputError,
+        signal,
+      });
+      return { bytes, contentType: response.headers.get("content-type") ?? undefined };
+    },
+  );
+}
+
 /**
  * Store a provider-hosted file in the local transit file service when enabled.
  */
@@ -1357,6 +1406,28 @@ export async function readTransitFileInput(
 }
 
 /**
+ * The action error code a provider request failure reports: the provider's own
+ * code when it chose one, else one inferred from the upstream status. A
+ * provider that needs to react to the classification, such as retrying a rate
+ * limit, reads it here instead of re-deriving it from the status.
+ */
+export function providerRequestErrorCode(error: ProviderRequestError): ProviderErrorCode {
+  // `provider_error` is the generic fallback; a 429 is unambiguous, so refine it.
+  // A specific provider code (including one chosen for a 429) still wins.
+  return error.code === "provider_error" && error.status === 429
+    ? "rate_limited"
+    : (error.code ??
+        (error.status === 401 || error.status === 403
+          ? "authorization_failed"
+          : error.status === 429
+            ? "rate_limited"
+            : // A 3xx is an upstream redirect that `redirect: "manual"` surfaced unfollowed, not bad input.
+              error.status < 500 && (error.status < 300 || error.status >= 400)
+              ? "invalid_input"
+              : "provider_error"));
+}
+
+/**
  * Map provider runtime failures to the standard action execution result.
  */
 export function toProviderExecutionError(error: unknown, fallbackMessage: string): ExecutionResult {
@@ -1364,16 +1435,7 @@ export function toProviderExecutionError(error: unknown, fallbackMessage: string
     return {
       ok: false,
       error: {
-        code:
-          error.code ??
-          (error.status === 401 || error.status === 403
-            ? "authorization_failed"
-            : error.status === 429
-              ? "rate_limited"
-              : // A 3xx is an upstream redirect that `redirect: "manual"` surfaced unfollowed, not bad input.
-                error.status < 500 && (error.status < 300 || error.status >= 400)
-                ? "invalid_input"
-                : "provider_error"),
+        code: providerRequestErrorCode(error),
         message: error.message,
         details: {
           status: error.status,

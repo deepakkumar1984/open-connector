@@ -2,6 +2,7 @@ import type { CatalogStore } from "../catalog-store.ts";
 import type { ConnectionService } from "../connection-service.ts";
 import type { ActionSearchIndexProvider } from "../core/action-search.ts";
 import type { ProviderHttpDispatchOptions } from "../core/provider-http-dispatch.ts";
+import type { ProviderNetworkPolicy } from "../core/provider-network-policy.ts";
 import type { RuntimeLogger, TransitFileUpload } from "../core/types.ts";
 import type { MarketplaceService } from "../marketplace/marketplace-service.ts";
 import type { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
@@ -25,6 +26,7 @@ import { ActionPolicyService } from "../core/action-policy.ts";
 import { createActionSearchIndexProvider } from "../core/action-search.ts";
 import { optionalRecord } from "../core/cast.ts";
 import { withProviderHttpDispatch } from "../core/provider-http-dispatch.ts";
+import { withProviderNetworkPolicy } from "../core/provider-network-policy.ts";
 import { ProviderDispatchRequestError, toProviderExecutionError } from "../providers/provider-runtime.ts";
 import { SaasError } from "../saas/saas-client.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
@@ -49,6 +51,7 @@ import { createSaasProjectRoutes } from "./api/saas-project-routes.ts";
 import { createTransitFileRoutes } from "./api/transit-file-routes.ts";
 import { createTriggerRoutes } from "./api/trigger-routes.ts";
 import { ProxyRunner } from "./proxy/proxy-runner.ts";
+import { readSlackEventRequestBody, verifySlackEventRequest } from "./slack-event-verification.ts";
 
 /**
  * Import and evaluate the modules the /mcp and /docs routes defer to their first request. The Node server never
@@ -63,6 +66,7 @@ export async function preloadOptionalServerModules(): Promise<void> {
  * Dependencies required to construct the local connector server.
  */
 export interface IConnectServerOptions {
+  network?: ProviderNetworkPolicy;
   providerHttpDispatch?: ProviderHttpDispatchOptions;
   catalog: CatalogStore;
   /** Public origin of this runtime, used for the HTTP request examples in Action guides. */
@@ -79,6 +83,8 @@ export interface IConnectServerOptions {
   transitFiles: ITransitFileService;
   uploadTransitFile?: (request: Request) => Promise<TransitFileUpload>;
   auth?: LocalAuthOptions;
+  /** Dedicated token for inbound provider event verification. */
+  eventVerifyToken?: string;
   actionPolicy?: ActionPolicyService;
   runtimePolicyStore: IRuntimePolicyStore;
   actionSearch?: ActionSearchIndexProvider;
@@ -88,6 +94,8 @@ export interface IConnectServerOptions {
   serveDocumentation?: boolean;
   /** Seconds the OAuth completion page waits before closing its window. `0` closes it as soon as it loads. */
   oauthCloseDelaySeconds?: number;
+  /** Origins a provider-refusal page may post its result to (`OOMOL_CONNECT_OAUTH_RESULT_ORIGINS`). */
+  oauthResultOrigins?: readonly string[];
   marketplace?: MarketplaceService;
   saasProject?: SaasProjectService;
   saas?: SaasExecutionService;
@@ -129,7 +137,9 @@ export class ConnectServer {
     const auth = this.options.auth ?? {};
 
     app.use("*", async (_context, next) => {
-      await withProviderHttpDispatch({ operation: "runtime" }, next, this.options.providerHttpDispatch);
+      await withProviderNetworkPolicy(this.options.network ?? {}, () =>
+        withProviderHttpDispatch({ operation: "runtime" }, next, this.options.providerHttpDispatch),
+      );
     });
 
     app.use("*", async (context, next) => {
@@ -155,6 +165,85 @@ export class ConnectServer {
       app.use("/api/*", compress());
     }
     app.use("*", createLocalAuthMiddleware(auth));
+
+    // Inbound provider event verification. This route authenticates with a dedicated token
+    // so a host ingress can delegate signature verification without receiving the admin token.
+    app.post("/v1/providers/slackbot/events/verify", async (context) => {
+      const expected = this.options.eventVerifyToken?.trim();
+      if (!expected)
+        return writeRuntimeFailure(context, {
+          status: 404,
+          errorCode: "event_verification_disabled",
+          message: "Event verification is disabled.",
+        });
+      const authorization = context.req.header("authorization") ?? "";
+      const provided = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+      if (!(await sameSecret(provided, expected)))
+        return writeRuntimeFailure(context, {
+          status: 401,
+          errorCode: "unauthorized",
+          message: "A valid event verification token is required.",
+        });
+      const config = await this.options.oauthClientConfigs.getConfig("slackbot");
+      const appId = String(config?.extra?.appId ?? "").trim();
+      const signingSecret = String(config?.secretExtra?.signingSecret ?? "").trim();
+      if (!appId || !signingSecret)
+        return writeRuntimeFailure(context, {
+          status: 409,
+          errorCode: "event_verification_not_configured",
+          message: "Configure the default Slack App ID and Signing Secret.",
+        });
+      const rawBody = await readSlackEventRequestBody(context.req.raw);
+      if (!rawBody)
+        return writeRuntimeFailure(context, {
+          status: 413,
+          errorCode: "webhook_request_too_large",
+          message: "Slack request body exceeds 64 KiB.",
+        });
+      const result = await verifySlackEventRequest({
+        timestamp: context.req.header("x-slack-request-timestamp") ?? "",
+        signature: context.req.header("x-slack-signature") ?? "",
+        rawBody,
+        configuredAppId: appId,
+        signingSecret,
+        contentType: context.req.header("content-type") ?? "",
+      });
+      if (!result.valid) {
+        switch (result.reason) {
+          case "body_too_large":
+            return writeRuntimeFailure(context, {
+              status: 413,
+              errorCode: "webhook_request_too_large",
+              message: "Slack request body exceeds 64 KiB.",
+            });
+          case "payload":
+            return writeRuntimeFailure(context, {
+              status: 400,
+              errorCode: "invalid_event_payload",
+              message: "Invalid Slack event envelope.",
+            });
+          case "app":
+            return writeRuntimeFailure(context, {
+              status: 403,
+              errorCode: "webhook_app_mismatch",
+              message: "Slack App ID does not match the configured application.",
+            });
+          case "timestamp":
+            return writeRuntimeFailure(context, {
+              status: 401,
+              errorCode: "invalid_webhook_timestamp",
+              message: "Invalid or expired Slack request timestamp.",
+            });
+          case "signature":
+            return writeRuntimeFailure(context, {
+              status: 401,
+              errorCode: "invalid_webhook_signature",
+              message: "Invalid Slack request signature.",
+            });
+        }
+      }
+      return writeRuntimeSuccess(context, result);
+    });
 
     // Health and runtime discovery / execution endpoints
     app.get("/v1/health", (context) => writeRuntimeSuccess(context, { ok: true, runtime: "connectors" }));
@@ -256,7 +345,13 @@ export class ConnectServer {
       app.route("/api", createSaasProjectRoutes({ saasProject: saas }));
     }
     if (saas && this.options.saasOAuth) {
-      app.route("/", createSaasOAuthRoutes({ saasProject: saas, saasOAuth: this.options.saasOAuth }));
+      app.route(
+        "/",
+        createSaasOAuthRoutes({
+          saasProject: saas,
+          saasOAuth: this.options.saasOAuth,
+        }),
+      );
     }
     app.route(
       "/",
@@ -267,6 +362,7 @@ export class ConnectServer {
         saasProject: this.options.saasProject,
         logger: this.options.logger,
         oauthCloseDelaySeconds: this.options.oauthCloseDelaySeconds,
+        oauthResultOrigins: this.options.oauthResultOrigins,
       }),
     );
 
@@ -300,9 +396,19 @@ export class ConnectServer {
         );
         if (error.retryAfter) context.header("Retry-After", error.retryAfter);
         if (context.req.path.startsWith("/v1/"))
-          return writeRuntimeFailure(context, { status: error.status, errorCode: error.code, message: error.message });
+          return writeRuntimeFailure(context, {
+            status: error.status,
+            errorCode: error.code,
+            message: error.message,
+          });
         return context.json(
-          { error: { code: error.code, message: error.message, reason: error.reason } },
+          {
+            error: {
+              code: error.code,
+              message: error.message,
+              reason: error.reason,
+            },
+          },
           error.status,
         );
       }
@@ -336,4 +442,19 @@ export class ConnectServer {
 
     return app;
   }
+}
+
+/** Hash both values before a constant-time comparison so length never leaks. */
+async function sameSecret(provided: string, expected: string): Promise<boolean> {
+  if (!provided || !expected) return false;
+  const encoder = new TextEncoder();
+  const [left, right] = await Promise.all([
+    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
+    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
+  ]);
+  const a = new Uint8Array(left);
+  const b = new Uint8Array(right);
+  let difference = 0;
+  for (let index = 0; index < a.length; index += 1) difference |= a[index]! ^ b[index]!;
+  return difference === 0;
 }

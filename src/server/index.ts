@@ -9,7 +9,7 @@ import { defaultLazySchemaCacheFiles } from "../catalog-lazy-schemas.ts";
 import { parseActionPolicyList } from "../core/action-policy.ts";
 import { parseEgressTrustedHosts, parsePrivateNetworkAccessFlag } from "../core/request.ts";
 import { isConsoleShellRequest } from "./api/console-paths.ts";
-import { DEFAULT_OAUTH_CLOSE_DELAY_SECONDS } from "./api/oauth-completion-page.ts";
+import { DEFAULT_OAUTH_CLOSE_DELAY_SECONDS, parseOAuthResultOrigins } from "./api/oauth-completion-page.ts";
 import { registerStaticRoutes } from "./api/static-routes.ts";
 import { resolveConnectionEventDispatcher } from "./connection-events.ts";
 import { createConnectorRuntime } from "./connector-runtime.ts";
@@ -77,6 +77,7 @@ async function main(): Promise<void> {
     encryptionKey: process.env.OOMOL_CONNECT_ENCRYPTION_KEY,
     adminToken: optionalEnv("OOMOL_CONNECT_ADMIN_TOKEN"),
     runtimeToken: optionalEnv("OOMOL_CONNECT_RUNTIME_TOKEN"),
+    eventVerifyToken: optionalEnv("OOMOL_CONNECT_EVENT_VERIFY_TOKEN"),
     jwt: {
       jwksUri: process.env.OOMOL_CONNECT_JWKS_URI,
       issuer: process.env.OOMOL_CONNECT_JWT_ISSUER,
@@ -95,6 +96,7 @@ async function main(): Promise<void> {
       blockedTriggers: parseActionPolicyList(process.env.OOMOL_CONNECT_BLOCKED_TRIGGERS),
     },
     allowedCustomOAuth: parseActionPolicyList(process.env.OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH),
+    oauthResultOrigins: parseOAuthResultOrigins(process.env.OOMOL_CONNECT_OAUTH_RESULT_ORIGINS),
     postgres: databaseUrl
       ? {
           connectionString: databaseUrl,
@@ -104,7 +106,10 @@ async function main(): Promise<void> {
       : undefined,
     transitFiles: readTransitFileOptions(),
     runLimit,
-    lazySchemas: parseBooleanEnv("OOMOL_CONNECT_CATALOG_LAZY_SCHEMAS"),
+    lazySchemas:
+      optionalEnv("OOMOL_CONNECT_CATALOG_LAZY_SCHEMAS") === undefined
+        ? true
+        : parseBooleanEnv("OOMOL_CONNECT_CATALOG_LAZY_SCHEMAS"),
     schemaCacheFiles: readPositiveIntegerEnv("OOMOL_CONNECT_CATALOG_SCHEMA_CACHE_FILES", defaultLazySchemaCacheFiles),
     connectionEvents: resolveConnectionEventDispatcher({
       url: process.env.OOMOL_CONNECT_WEBHOOK_URL,

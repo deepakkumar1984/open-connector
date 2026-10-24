@@ -1,4 +1,5 @@
-import type { StoredConnection, ConnectionService } from "../connection-service.ts";
+import type { ConnectionService } from "../connection-service.ts";
+import type { StoredConnection } from "../connection-store.ts";
 import type { OAuth2AuthDefinition } from "../core/types.ts";
 import type { IProviderLoader } from "../providers/provider-loader.ts";
 import type { SaasOAuthService } from "../saas/saas-oauth-service.ts";
@@ -17,7 +18,8 @@ import type {
 import type { OAuthTokenResult } from "./oauth-token.ts";
 
 import { createHash, randomBytes } from "node:crypto";
-import { ConnectionError, normalizeConnectionName } from "../connection-service.ts";
+import { ConnectionError } from "../connection-error.ts";
+import { normalizeConnectionName } from "../connection-service.ts";
 import {
   providerFetch,
   ProviderDispatchRequestError,
@@ -208,6 +210,16 @@ export class OAuthFlowService {
       },
     });
     return callbackReturnUri(pending, "error", code, message);
+  }
+
+  /**
+   * Ends a runtime authorization (`POST /api/oauth/authorizations`) that the
+   * provider refused, so a later callback for the same state cannot complete
+   * it. Returns false when no such authorization was pending (unknown, or
+   * already completed or refused by another callback).
+   */
+  async discardAuthorization(state: string): Promise<boolean> {
+    return (await this.states.take(state)) !== undefined;
   }
 
   private async prepareAuthorization(

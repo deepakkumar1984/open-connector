@@ -2,8 +2,10 @@ import type { ExecutionContext, ResolvedCredential } from "../core/types.ts";
 import type { ProviderActionHandlers, ProviderActionSources } from "./provider-runtime.ts";
 
 import { afterEach, describe, expect, expectTypeOf, it, vi } from "vitest";
-import { isPrivateNetworkAccessAllowed, setPrivateNetworkAccessAllowed } from "../core/request.ts";
+import { withProviderNetworkPolicy } from "../core/provider-network-policy.ts";
+import { isPrivateNetworkAccessAllowed } from "../core/request.ts";
 import {
+  downloadUploadSource,
   createProviderTimeout,
   createProviderProxyUrl,
   defineOAuthProviderExecutors,
@@ -29,7 +31,6 @@ import {
 
 afterEach(() => {
   vi.unstubAllGlobals();
-  setPrivateNetworkAccessAllowed(false);
 });
 
 describe("ProviderRequestError", () => {
@@ -55,6 +56,24 @@ describe("toProviderExecutionError", () => {
         details: { status: 402, details: { balance: 0 } },
       },
     });
+  });
+
+  it("refines a generic provider error at an upstream rate limit without overriding a specific code", () => {
+    expect(
+      toProviderExecutionError(new ProviderRequestError(429, "Slow down", undefined, "provider_error"), "failed"),
+    ).toMatchObject({
+      error: { code: "rate_limited", message: "Slow down", details: { status: 429 } },
+    });
+    expect(
+      toProviderExecutionError(
+        new ProviderRequestError(429, "Credits exhausted", undefined, "insufficient_credit"),
+        "failed",
+      ).error?.code,
+    ).toBe("insufficient_credit");
+    expect(
+      toProviderExecutionError(new ProviderRequestError(401, "Keyless request", undefined, "provider_error"), "failed")
+        .error?.code,
+    ).toBe("provider_error");
   });
 
   it("maps an upstream redirect status to a provider error rather than invalid input", () => {
@@ -98,6 +117,42 @@ describe("readProviderJson", () => {
 });
 
 describe("readProviderProxyResponse", () => {
+  it.each(["hello", "中文 café", '{"value":1}', "�"])(
+    "preserves valid UTF-8 without Content-Type as text: %s",
+    async (data) => {
+      const result = await readProviderProxyResponse(new Response(new TextEncoder().encode(data)));
+      expect(result.data).toBe(data);
+      expect(result).not.toHaveProperty("bodyEncoding");
+    },
+  );
+
+  it("preserves binary bytes without Content-Type", async () => {
+    const bytes = new Uint8Array([0xff, 0x80]);
+    const result = await readProviderProxyResponse(new Response(bytes));
+    expect(result.bodyEncoding).toBe("base64");
+    expect(Buffer.from(result.data as string, "base64")).toEqual(Buffer.from(bytes));
+  });
+
+  it.each(["application/x-ndjson", "Application/X-Ndjson; charset=utf-8"])(
+    "preserves NDJSON text for %s",
+    async (contentType) => {
+      const data = '{"value":"中文"}\n{"value":2}\n';
+      const result = await readProviderProxyResponse(new Response(data, { headers: { "content-type": contentType } }));
+      expect(result.data).toBe(data);
+      expect(result).not.toHaveProperty("bodyEncoding");
+    },
+  );
+
+  it.each(["application/json", "Application/Problem+Json; charset=utf-8"])(
+    "parses JSON media types for %s",
+    async (contentType) => {
+      const result = await readProviderProxyResponse(
+        new Response('{"value":1}', { headers: { "content-type": contentType } }),
+      );
+      expect(result.data).toEqual({ value: 1 });
+    },
+  );
+
   it.each([
     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     "Application/Vnd.Openxmlformats-Officedocument.Wordprocessingml.Document ; charset=binary",
@@ -1287,13 +1342,13 @@ describe("provider egress SSRF guard", () => {
       },
       createContext: (_context, fetcher) => ({ fetcher }),
     });
-    setPrivateNetworkAccessAllowed(true);
+    return withProviderNetworkPolicy({ allowPrivateNetwork: true }, async () => {
+      const result = await executors["test_service.probe"]!({}, executionContext);
 
-    const result = await executors["test_service.probe"]!({}, executionContext);
-
-    expect(result.ok).toBe(false);
-    expect(result.error?.message).toContain("must not target private or reserved IP addresses");
-    expect(calls).toHaveLength(0);
+      expect(result.ok).toBe(false);
+      expect(result.error?.message).toContain("must not target private or reserved IP addresses");
+      expect(calls).toHaveLength(0);
+    });
   });
 
   it("reaches private targets for opted-in executors once the deployment enables the flag", async () => {
@@ -1308,12 +1363,12 @@ describe("provider egress SSRF guard", () => {
       createContext: (_context, fetcher) => ({ fetcher }),
       allowPrivateNetwork: isPrivateNetworkAccessAllowed,
     });
-    setPrivateNetworkAccessAllowed(true);
+    return withProviderNetworkPolicy({ allowPrivateNetwork: true }, async () => {
+      const result = await executors["test_service.probe"]!({}, executionContext);
 
-    const result = await executors["test_service.probe"]!({}, executionContext);
-
-    expect(result.ok).toBe(true);
-    expect(calls.map((call) => call.url)).toEqual(["http://10.0.0.5:8123/api/"]);
+      expect(result.ok).toBe(true);
+      expect(calls.map((call) => call.url)).toEqual(["http://10.0.0.5:8123/api/"]);
+    });
   });
 
   it("keeps the opt-in gated on the deployment flag and never unblocks loopback", async () => {
@@ -1330,12 +1385,13 @@ describe("provider egress SSRF guard", () => {
 
     const calls = stubFetchSequence([]);
     const disabled = await executors["test_service.probe"]!({ url: "http://10.0.0.5:8123/api/" }, executionContext);
-    setPrivateNetworkAccessAllowed(true);
-    const loopback = await executors["test_service.probe"]!({ url: "http://127.0.0.1:8123/api/" }, executionContext);
+    return withProviderNetworkPolicy({ allowPrivateNetwork: true }, async () => {
+      const loopback = await executors["test_service.probe"]!({ url: "http://127.0.0.1:8123/api/" }, executionContext);
 
-    expect(disabled.ok).toBe(false);
-    expect(loopback.ok).toBe(false);
-    expect(calls).toHaveLength(0);
+      expect(disabled.ok).toBe(false);
+      expect(loopback.ok).toBe(false);
+      expect(calls).toHaveLength(0);
+    });
   });
 });
 
@@ -1560,4 +1616,23 @@ describe("provider runtime fetch", () => {
     });
     expect(nativeFetchThis).toBeUndefined();
   });
+});
+
+it("rejects a private source before fetching even with an injected fetcher", async () => {
+  const fetcher = vi.fn<typeof fetch>();
+  await expect(
+    downloadUploadSource({ url: "http://127.0.0.1/private", fieldName: "fileUrl", fetcher }),
+  ).rejects.toThrow();
+  expect(fetcher).not.toHaveBeenCalled();
+});
+it("limits streamed bytes and preserves the media type", async () => {
+  const fetcher = vi.fn<typeof fetch>(
+    async () => new Response(new Uint8Array([1, 2, 3]), { headers: { "content-type": "image/png" } }),
+  );
+  const options = { url: "https://1.1.1.1/file", fieldName: "fileUrl", fetcher };
+  expect(await downloadUploadSource({ ...options, maximumBytes: 3 })).toEqual({
+    bytes: new Uint8Array([1, 2, 3]),
+    contentType: "image/png",
+  });
+  await expect(downloadUploadSource({ ...options, maximumBytes: 2 })).rejects.toThrow();
 });
