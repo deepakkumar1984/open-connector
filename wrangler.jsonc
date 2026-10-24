@@ -4,6 +4,19 @@
   "main": "src/server/cloudflare.ts",
   "compatibility_date": "2026-07-02",
   "compatibility_flags": ["nodejs_compat"],
+  // The custom domain is managed in the Cloudflare dashboard. Declare it here so
+  // `wrangler deploy` keeps it instead of detaching it: a route missing from the
+  // local config is treated as a removal. workers_dev/preview_urls are explicit
+  // because adding a route makes Wrangler default both to false; these values
+  // preserve the Worker's current remote settings.
+  "workers_dev": true,
+  "preview_urls": true,
+  "routes": [
+    {
+      "pattern": "connectors.blazorly.com",
+      "custom_domain": true,
+    },
+  ],
   "cache": {
     "enabled": true,
   },
