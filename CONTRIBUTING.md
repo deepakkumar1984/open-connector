@@ -46,6 +46,9 @@ Generated `src/providers/registry*.generated.ts`, `src/providers/action-contract
 If you use an agent to add providers, the optional workflow in
 [.codex/skills/add-provider/SKILL.md](.codex/skills/add-provider/SKILL.md) follows the same rules.
 
+To let a chat channel's inbound events be verified through OpenConnector, follow
+[Channel Event Verification](docs/channel-event-verification.md#adding-a-channel).
+
 ## Third-Party Rights
 
 Do not contribute third-party logos, icons, screenshots, documentation excerpts, API schemas, or
@@ -56,5 +59,7 @@ This project uses such references only for identification and interoperability.
 
 ## Contribution License
 
-By submitting a pull request, you agree that your contribution is provided under the Apache License,
-Version 2.0, unless you clearly mark it otherwise in writing.
+OpenConnector is licensed under the OpenConnector License, a modified Apache License 2.0. See
+[LICENSE.txt](LICENSE.txt). By submitting a pull request, you agree to the contributor terms in
+section 2 of that license: OOMOL may adjust the license to be more strict or more relaxed, and your
+contribution may be used for commercial purposes, including OOMOL's hosted services.

@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCatalogStore } from "../../catalog-store.ts";
 import { requestAuthorizationCodeToken } from "../../oauth/oauth-token.ts";
 import { provider as githubProvider } from "../../providers/github/definition.ts";
+import { provider as notionProvider } from "../../providers/notion/definition.ts";
 import { ProviderLoader } from "../../providers/provider-loader.ts";
 import { provider as slackProvider } from "../../providers/slack/definition.ts";
 import { slackCredentialValidators } from "../../providers/slack/runtime.ts";
@@ -53,17 +54,19 @@ async function setup(
   const database = new SqliteRuntimeDatabase(":memory:");
   databases.push(database);
   await database.oauthClientConfigStore.set({
-    service: "example",
+    service: definition.service,
     clientId: "client",
     clientSecret: "secret",
     extra: {},
     secretExtra: {},
   });
+  const logger = { info: vi.fn(), warn: vi.fn(), error: vi.fn() };
   const { app } = await createConnectApp({
+    logger,
     catalog: createCatalogStore([definition]),
     runtimeDatabase: database,
     providerLoader: new ProviderLoader({
-      example: async () => ({
+      [definition.service]: async () => ({
         executors: {},
         credentialValidators,
         oauth: {
@@ -90,8 +93,8 @@ async function setup(
       headers: { "content-type": "application/json", ...(token ? { authorization: `Bearer ${token}` } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
     });
-  const start = async () => (await (await call("/v1/connections/example/connect", {})).json()).data;
-  return { app, database, call, start };
+  const start = async () => (await (await call(`/v1/connections/${definition.service}/connect`, {})).json()).data;
+  return { app, database, call, start, logger };
 }
 
 it("reports console OAuth validation failure without saving a connection or losing client configuration", async () => {
@@ -240,17 +243,77 @@ describe("shared personal connection API", () => {
     expect((await restricted.call("/v1/connections", undefined, "runtime")).status).toBe(403);
   });
 
-  it("records a safe failure when token exchange fails", async () => {
-    const { call, start } = await setup(async () => {
-      throw new Error("secret-token");
-    });
-    const request = await start();
-    await call(`/oauth/callback?state=${request.stateHandle}&code=code`);
-    const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
-    expect(result).toMatchObject({ status: "failed", errorCode: "provider_error" });
-    expect(JSON.stringify(result)).not.toContain("secret-token");
-  });
+  it.each([undefined, "https://client.example/done"])(
+    "logs token exchange failure without echoed credentials with return URI %s",
+    async (returnUri) => {
+      const { call, logger } = await setup(async ({ code, clientConfig, createError }) => {
+        throw createError(`Rejected code=${code} client_secret=${clientConfig.clientSecret}`);
+      });
+      const request = (await (await call("/v1/connections/example/connect", { returnUri })).json()).data;
+      const response = await call(`/oauth/callback?state=${request.stateHandle}&code=private-code`);
+      expect(response.status).toBe(returnUri ? 302 : 400);
+      const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
+      expect(result).toMatchObject({ status: "failed", errorCode: "provider_error" });
+      expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+        {
+          path: "/oauth/callback",
+          hasState: true,
+          hasCode: true,
+          errorCode: "provider_error",
+          causeCode: "oauth_token_exchange_failed",
+        },
+        "oauth callback failed",
+      );
+      const output = JSON.stringify({
+        result,
+        logs: logger.warn.mock.calls,
+        response: response.headers.get("location") ?? (await response.text()),
+      });
+      expect(output).not.toContain("private-code");
+      expect(output).not.toContain("secret");
+      expect(output).not.toContain(request.stateHandle);
+    },
+  );
 });
+
+it.each([undefined, "https://client.example/done"])(
+  "logs the underlying validation failure with return URI %s",
+  async (returnUri) => {
+    const message = "GET /v1/profile does not support oauth access yet; token=access-secret";
+    const { call, logger, database } = await setup(undefined, {}, provider, {
+      async oauth2() {
+        throw new Error(message);
+      },
+    });
+    const request = (await (await call("/v1/connections/example/connect", { returnUri })).json()).data;
+    const response = await call(`/oauth/callback?state=${request.stateHandle}&code=private-code`);
+    expect(response.status).toBe(returnUri ? 302 : 400);
+    expect(logger.warn).toHaveBeenCalledExactlyOnceWith(
+      {
+        path: "/oauth/callback",
+        hasState: true,
+        hasCode: true,
+        errorCode: "provider_error",
+        causeCode: "credential_verification_failed",
+      },
+      "oauth callback failed",
+    );
+    const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
+    expect(result).toMatchObject({
+      status: "failed",
+      errorCode: "provider_error",
+      errorMessage: "OAuth connection failed.",
+    });
+    expect(JSON.stringify(result)).not.toContain(message);
+    expect(response.headers.get("location") ?? (await response.text())).not.toContain(message);
+    expect(await database.connectionStore.list()).toEqual([]);
+    const logs = JSON.stringify(logger.warn.mock.calls);
+    expect(logs).not.toContain(message);
+    expect(logs).not.toContain("access-secret");
+    expect(logs).not.toContain("private-code");
+    expect(logs).not.toContain(request.stateHandle);
+  },
+);
 
 it("applies declared authorization options and always includes required scopes", async () => {
   const { call } = await setup(undefined, {}, { ...githubProvider, service: "example", actions: [] });
@@ -602,4 +665,82 @@ describe("connection lifecycle events", () => {
     const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
     expect(result.status).toBe("connected");
   });
+});
+
+it.each([
+  ["template-page-id", { duplicatedTemplateId: "template-page-id" }],
+  [undefined, undefined],
+  [null, undefined],
+  ["", undefined],
+  [42, undefined],
+])("reads only the safe Notion OAuth template field for %j", async (templateId, expected) => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      Response.json({
+        access_token: "notion-access-secret",
+        refresh_token: "notion-refresh-secret",
+        client_secret: "notion-client-secret",
+        token_type: "bearer",
+        duplicated_template_id: templateId,
+        arbitrary_field: "private-metadata",
+      }),
+    ),
+  );
+  const { call, start, database } = await setup(
+    async () =>
+      requestAuthorizationCodeToken({
+        clientId: "client",
+        clientSecret: "secret",
+        code: "code",
+        redirectUri: "http://localhost/oauth/callback",
+        tokenUrl: "https://api.notion.com/v1/oauth/token",
+        tokenEndpointAuthMethod: "client_secret_basic",
+        tokenRequestFormat: "json",
+        createError: (message) => new Error(message),
+      }),
+    {},
+    { ...notionProvider, actions: [] },
+  );
+  const request = await start();
+  expect((await call(`/oauth/callback?state=${request.stateHandle}&code=code`)).status).toBe(200);
+  const result = (await (await call(`/v1/connection-requests/${request.connectionRequestId}`)).json()).data;
+  expect(result.status).toBe("connected");
+  const stored = (await database.connectionStore.list())[0];
+  expect(stored?.credential).toMatchObject({ metadata: { arbitrary_field: "private-metadata" } });
+  if (templateId !== undefined)
+    expect(stored?.credential).toMatchObject({ metadata: { duplicated_template_id: templateId } });
+  const detail = (await (await call(`/v1/connections/by-id/${result.appId}`)).json()).data;
+  const list = (await (await call("/v1/connections")).json()).data;
+  expect(detail.notion).toEqual(expected);
+  expect(list).toEqual([detail]);
+  if (!expected) expect(detail).not.toHaveProperty("notion");
+  for (const secret of [
+    "notion-access-secret",
+    "notion-refresh-secret",
+    "notion-client-secret",
+    "private-metadata",
+    "metadata",
+  ]) {
+    expect(JSON.stringify(detail)).not.toContain(secret);
+  }
+});
+
+it("does not expose Notion fields for another provider or internal integration tokens", async () => {
+  const metadata = { duplicated_template_id: "template-page-id" };
+  const other = await setup(async () => ({ accessToken: "secret", tokenType: "Bearer", metadata }));
+  const request = await other.start();
+  await other.call(`/oauth/callback?state=${request.stateHandle}&code=code`);
+  expect((await (await other.call("/v1/connections")).json()).data[0]).not.toHaveProperty("notion");
+  const notion = await setup(
+    undefined,
+    {},
+    { ...notionProvider, actions: [] },
+    {
+      apiKey: async () => ({ metadata }),
+    },
+  );
+  const response = await notion.call("/v1/connections/notion/connect/api-key", { apiKey: "internal-secret" });
+  expect(response.status).toBe(200);
+  expect((await response.json()).data).not.toHaveProperty("notion");
 });

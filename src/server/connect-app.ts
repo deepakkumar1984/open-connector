@@ -13,7 +13,7 @@ import type { Hono } from "hono";
 
 import { ConnectionService } from "../connection-service.ts";
 import { ActionPolicyService as ExecutionPolicyService } from "../core/action-policy.ts";
-import { withProviderNetworkPolicy } from "../core/provider-network-policy.ts";
+import { withRuntimeExecution } from "../core/runtime-execution.ts";
 import { MarketplaceService } from "../marketplace/marketplace-service.ts";
 import { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import { OAuthCredentialRefreshService } from "../oauth/oauth-credential-refresh-service.ts";
@@ -89,7 +89,11 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
     store: options.runtimeDatabase.marketplaceStore,
     secretCodec: options.secretCodec,
   });
-  await withProviderNetworkPolicy(network, () => marketplace.initialize());
+  await withRuntimeExecution(
+    { network, providerHttpDispatch: options.providerHttpDispatch },
+    { operation: "runtime" },
+    () => marketplace.initialize(),
+  );
   const runtimeTokens = new RuntimeTokenService(options.runtimeDatabase.runtimeTokenStore, options.logger);
   const hasStoredRuntimeTokens = async (): Promise<boolean> => (await runtimeTokens.listTokens()).length > 0;
   const allowedCustomOAuth = new Set(options.allowedCustomOAuth);
@@ -111,6 +115,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
     marketplace,
   });
   const actions = new ActionRunner({
+    network,
     providerHttpDispatch: options.providerHttpDispatch,
     catalog: options.catalog,
     providerLoader: options.providerLoader,
@@ -123,6 +128,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
   });
 
   const triggers = new TriggerRunner({
+    network,
     oauthClientConfigs,
     providerHttpDispatch: options.providerHttpDispatch,
     catalog: options.catalog,
@@ -132,6 +138,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
   });
   const triggerMaintenance = new TriggerMaintenance({
     network,
+    providerHttpDispatch: options.providerHttpDispatch,
     store: options.runtimeDatabase.triggerStore,
     runner: triggers,
     tokens: options.runtimeDatabase.runtimeTokenStore,
@@ -143,6 +150,7 @@ export async function createConnectApp(options: ConnectAppOptions): Promise<Conn
     triggerMaintenance,
     saasCleanup: new SaasCleanupService({
       network,
+      providerHttpDispatch: options.providerHttpDispatch,
       store: options.runtimeDatabase.saasProjectStore,
       requests: options.runtimeDatabase.connectionRequestStore,
       client: saasClient,

@@ -2,7 +2,6 @@ import type { JsonSchema } from "../../core/types.ts";
 import type { TriggerKeySnapshot } from "../../triggers/common/types.ts";
 
 import { jsonSchema as s } from "../../core/json-schema.ts";
-const idPattern: string = "^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$";
 const eventSchema: JsonSchema = s.object(
   {
     createdBy: { type: "object" },
@@ -37,23 +36,54 @@ export const snapshot: TriggerKeySnapshot & { readonly type: "poll" } = {
   configInputs: [
     {
       handle: "dataSourceId",
-      jsonSchema: s.string({
+      jsonSchema: {
+        type: "string",
         pattern: "^(?:|[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12})$",
-      }),
+      },
       nullable: false,
       value: "",
     },
-    { handle: "databaseId", jsonSchema: s.string({ pattern: idPattern }), nullable: false },
+    {
+      handle: "databaseId",
+      jsonSchema: {
+        type: "string",
+        pattern: "^[0-9a-fA-F]{8}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{4}-?[0-9a-fA-F]{12}$",
+      },
+      nullable: false,
+    },
     {
       handle: "events",
-      jsonSchema: s.array(s.stringEnum(["page_added", "page_updated"]), { minItems: 1, uniqueItems: true }),
+      jsonSchema: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["page_added", "page_updated"],
+        },
+        minItems: 1,
+        uniqueItems: true,
+      },
       nullable: false,
       value: ["page_added"],
     },
-    { handle: "includeProperties", jsonSchema: s.boolean(), nullable: false, value: true },
+    {
+      group: "Advanced settings",
+      collapsed: true,
+    },
+    {
+      handle: "includeProperties",
+      jsonSchema: {
+        type: "boolean",
+      },
+      nullable: false,
+      value: true,
+    },
     {
       handle: "maxItemsPerPoll",
-      jsonSchema: s.integer({ maximum: 100, minimum: 1 }),
+      jsonSchema: {
+        type: "integer",
+        minimum: 1,
+        maximum: 100,
+      },
       nullable: false,
       value: 25,
     },

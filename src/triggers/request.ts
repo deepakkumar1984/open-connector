@@ -1,14 +1,17 @@
 import type { JsonValue } from "./common/types.ts";
 import type { SourceOperation } from "./sources/operation.ts";
+import type { PersistentSourceRequest } from "./sources/persistent.ts";
 
 import { z } from "zod";
-import { HttpRequestError } from "../server/api/http-utils.ts";
+import { ExecutionError } from "../core/execution-error.ts";
 import { sourceOperationSchema } from "./sources/operation.ts";
+import { persistentSourceRequestSchema } from "./sources/persistent.ts";
 
 const config = z.record(z.string(), z.json());
 const subscriptionId = z.string().min(1).max(128);
 const requestKey = z.string().min(1).max(512);
 const requestSchema = z.discriminatedUnion("operation", [
+  z.strictObject({ operation: z.literal("sourceReference"), request: persistentSourceRequestSchema }),
   z.strictObject({ operation: z.literal("source"), request: sourceOperationSchema }),
   z.strictObject({ operation: z.literal("options"), config, field: z.string().min(1).max(128) }),
   z.strictObject({ operation: z.literal("read"), config, checkpoint: z.json() }),
@@ -39,6 +42,7 @@ interface ConfigRequest {
   config: Readonly<Record<string, JsonValue>>;
 }
 export type TriggerRequest =
+  | { operation: "sourceReference"; request: PersistentSourceRequest }
   | { operation: "source"; request: SourceOperation }
   | (ConfigRequest & { operation: "options"; field: string })
   | (ConfigRequest & { operation: "read"; checkpoint: JsonValue })
@@ -63,14 +67,14 @@ export type TriggerRequest =
 
 export function readTriggerRequest(value: unknown): TriggerRequest {
   const result = requestSchema.safeParse(value);
-  if (!result.success) throw new HttpRequestError("invalid_input", "Invalid Trigger operation input.");
+  if (!result.success) throw new ExecutionError("invalid_input", "Invalid Trigger operation input.");
   if (result.data.operation === "read" && Buffer.byteLength(JSON.stringify(result.data.checkpoint)) > 65536)
-    throw new HttpRequestError("invalid_input", "Trigger checkpoint exceeds 64 KiB.");
+    throw new ExecutionError("invalid_input", "Trigger checkpoint exceeds 64 KiB.");
   if (result.data.operation === "receive") {
     const headers: Record<string, string> = {};
     for (const [key, value] of Object.entries(result.data.headers)) {
       const name = key.toLowerCase();
-      if (name in headers) throw new HttpRequestError("invalid_input", "Duplicate webhook header.");
+      if (name in headers) throw new ExecutionError("invalid_input", "Duplicate webhook header.");
       headers[name] = value;
     }
     result.data.headers = headers;

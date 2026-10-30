@@ -24,6 +24,7 @@ import type { IOAuthCredentialRefresher, OAuthRevocationOutcome } from "./oauth/
 import type { IProviderLoader } from "./providers/provider-loader.ts";
 
 import { ConnectionError } from "./connection-error.ts";
+import { optionalString } from "./core/cast.ts";
 import { normalizeCredentialValues } from "./core/credential-fields.ts";
 import { apiKeyCredentialFields } from "./core/provider-setup.ts";
 import { CredentialResolver, isOAuthCredentialExpired } from "./credential-resolver.ts";
@@ -52,6 +53,7 @@ export interface ConnectionSummary {
   profile: CredentialProfile;
   /** Completed OAuth consent state; absent for legacy and non-OAuth connections. */
   oauthAuthorizationId?: string;
+  notion?: { duplicatedTemplateId: string };
   marketplace?: { id: string; pricing: MarketplacePricing };
   saas?: StoredSaasConnection["reference"];
 }
@@ -103,21 +105,21 @@ export interface DisconnectedConnectionSummary {
   revoked: OAuthRevocationOutcome;
 }
 
-export type ExecutionConnection = LocalExecutionConnection | MarketplaceExecutionConnection | SaasExecutionConnection;
+export type ResolvedConnection = LocalResolvedConnection | MarketplaceResolvedConnection | SaasResolvedConnection;
 
-interface LocalExecutionConnection {
-  kind: "local";
+interface LocalResolvedConnection {
+  source: "local";
   summary?: ConnectionSummary;
-  getCredential(service: string): Promise<ResolvedCredential | undefined>;
+  credential?: ResolvedCredential;
 }
 
-interface MarketplaceExecutionConnection {
-  kind: "marketplace";
+interface MarketplaceResolvedConnection {
+  source: "marketplace";
   summary: ConnectionSummary;
 }
 
-interface SaasExecutionConnection {
-  kind: "saas";
+interface SaasResolvedConnection {
+  source: "saas";
   summary: ManagedConnectionSummary;
   reference: SaasConnectionReference;
 }
@@ -271,24 +273,24 @@ export class ConnectionService {
         : undefined;
   }
 
-  async resolveForExecution(
+  async resolveConnection(
     service: string,
     connectionName?: string,
     connectionId?: string,
-  ): Promise<ExecutionConnection> {
+  ): Promise<ResolvedConnection> {
     const provider = this.getProvider(service);
     const stored = await this.selectStoredConnection(service, connectionName, connectionId);
     const name = stored?.connectionName ?? normalizeConnectionName(connectionName);
     const marketplace = connectionId
       ? undefined
       : await this.resolveMarketplaceSummary(provider, connectionName, Boolean(stored));
-    if (marketplace) return { kind: "marketplace", summary: marketplace };
+    if (marketplace) return { source: "marketplace", summary: marketplace };
     if (!stored && connectionName && !this.supportsAuth(provider, "no_auth")) {
       throw new ConnectionError("connection_not_found", `${service} connection not found: ${name}.`);
     }
 
     if (stored?.source === "saas")
-      return { kind: "saas", summary: this.createManagedConnectionSummary(stored), reference: stored.reference };
+      return { source: "saas", summary: this.createManagedConnectionSummary(stored), reference: stored.reference };
     let credential = stored ? await this.credentials.resolve(stored) : undefined;
     credential ??= this.supportsAuth(provider, "no_auth") ? { authType: "no_auth" } : undefined;
     const summary = stored
@@ -298,9 +300,9 @@ export class ConnectionService {
         : undefined;
 
     return {
-      kind: "local",
+      source: "local",
       summary,
-      getCredential: async (requestedService) => (requestedService === service ? credential : undefined),
+      credential,
     };
   }
 
@@ -516,7 +518,7 @@ export class ConnectionService {
   }
 
   private async saveCredential(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     credential: Exclude<ResolvedCredential, { authType: "no_auth" }>,
     input: ConnectWithCredentialInput,
   ): Promise<ConnectionSummary> {
@@ -619,7 +621,7 @@ export class ConnectionService {
   }
 
   private createConfiguredConnectionSummary(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     id: string,
     connectionName: string,
     credential: ResolvedCredential,
@@ -636,7 +638,7 @@ export class ConnectionService {
   }
 
   private createStoredConnectionSummary(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     id: string,
     connectionName: string,
     credential: Exclude<ResolvedCredential, { authType: "no_auth" }>,
@@ -657,14 +659,21 @@ export class ConnectionService {
       default: connectionName === defaultConnectionName,
       profile: credential.profile,
     };
-    // Credential metadata also contains client secrets. Expose only this runtime-owned string.
+    // Credential metadata also contains client secrets. Expose only explicitly allowed fields.
     if (credential.authType === "oauth2" && typeof credential.metadata.oauthAuthorizationId === "string") {
       summary.oauthAuthorizationId = credential.metadata.oauthAuthorizationId;
+    }
+    if (provider.service === "notion" && credential.authType === "oauth2") {
+      const duplicatedTemplateId = optionalString(credential.metadata.duplicated_template_id);
+      if (duplicatedTemplateId) summary.notion = { duplicatedTemplateId };
     }
     return summary;
   }
 
-  private createNoAuthConnectionSummary(provider: ProviderDefinition, connectionName: string): ConnectionSummary {
+  private createNoAuthConnectionSummary(
+    provider: Omit<ProviderDefinition, "actions">,
+    connectionName: string,
+  ): ConnectionSummary {
     return {
       id: `${provider.service}:${connectionName}`,
       service: provider.service,
@@ -691,7 +700,7 @@ export class ConnectionService {
   }
 
   private createMarketplaceConnectionSummary(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     preferences: ReadonlyMap<string, boolean>,
     isDefault = false,
   ): ConnectionSummary | undefined {
@@ -738,11 +747,11 @@ export class ConnectionService {
     return provider;
   }
 
-  private supportsAuth(provider: ProviderDefinition, authType: AuthType): boolean {
+  private supportsAuth(provider: Omit<ProviderDefinition, "actions">, authType: AuthType): boolean {
     return provider.authTypes.includes(authType);
   }
 
-  private getApiKeyDefinition(provider: ProviderDefinition): ApiKeyAuthDefinition {
+  private getApiKeyDefinition(provider: Omit<ProviderDefinition, "actions">): ApiKeyAuthDefinition {
     const auth = provider.auth.find((auth) => auth.type === "api_key");
     if (!auth || auth.type !== "api_key") {
       throw new ConnectionError("unsupported_auth_type", `${provider.service} does not support api_key.`);
@@ -751,7 +760,7 @@ export class ConnectionService {
     return auth;
   }
 
-  private getCustomCredentialDefinition(provider: ProviderDefinition): CustomCredentialAuthDefinition {
+  private getCustomCredentialDefinition(provider: Omit<ProviderDefinition, "actions">): CustomCredentialAuthDefinition {
     const auth = provider.auth.find((auth) => auth.type === "custom_credential");
     if (!auth || auth.type !== "custom_credential") {
       throw new ConnectionError("unsupported_auth_type", `${provider.service} does not support custom_credential.`);
@@ -844,7 +853,7 @@ export class ConnectionService {
   }
 
   private buildCredentialRuntimeData(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     authType: Exclude<AuthType, "no_auth">,
     credentialFields: CredentialDefinition[],
     credentialValues: Record<string, string>,
@@ -864,7 +873,7 @@ export class ConnectionService {
   }
 
   private mergeCredentialRuntimeData(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     authType: Exclude<AuthType, "no_auth">,
     credential: Extract<ResolvedCredential, { authType: "oauth2" }>,
     validation: CredentialValidationResult,
@@ -890,7 +899,7 @@ export class ConnectionService {
   }
 
   private createCredentialProfile(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     authType: Exclude<AuthType, "no_auth">,
     credentialFields: CredentialDefinition[],
     credentialValues: Record<string, string>,
@@ -924,7 +933,7 @@ export class ConnectionService {
     };
   }
 
-  private createNoAuthProfile(provider: ProviderDefinition): CredentialProfile {
+  private createNoAuthProfile(provider: Omit<ProviderDefinition, "actions">): CredentialProfile {
     return {
       accountId: `${provider.service}:public`,
       displayName: `${provider.displayName} Public`,
@@ -933,7 +942,7 @@ export class ConnectionService {
   }
 
   private createDefaultAccountId(
-    provider: ProviderDefinition,
+    provider: Omit<ProviderDefinition, "actions">,
     authType: Exclude<AuthType, "no_auth">,
     credentialFields: CredentialDefinition[],
     credentialValues: Record<string, string>,
@@ -947,7 +956,10 @@ export class ConnectionService {
       : `${provider.service}:${authType}`;
   }
 
-  private createDefaultDisplayName(provider: ProviderDefinition, authType: Exclude<AuthType, "no_auth">): string {
+  private createDefaultDisplayName(
+    provider: Omit<ProviderDefinition, "actions">,
+    authType: Exclude<AuthType, "no_auth">,
+  ): string {
     return `${provider.displayName} ${authType === "api_key" ? "API Key" : "Credential"}`;
   }
 }

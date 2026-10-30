@@ -39,24 +39,62 @@ export const snapshot: TriggerKeySnapshot & { readonly type: "poll" } = {
   configInputs: [
     {
       handle: "events",
-      jsonSchema: s.array(s.stringEnum(["created", "updated", "deleted"]), { minItems: 1, uniqueItems: true }),
+      jsonSchema: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["created", "updated", "deleted"],
+        },
+        minItems: 1,
+        uniqueItems: true,
+      },
       nullable: false,
       value: ["created", "updated"],
     },
-    { handle: "itemId", jsonSchema: s.string(), nullable: false, value: "" },
+    {
+      handle: "itemId",
+      jsonSchema: {
+        type: "string",
+      },
+      nullable: false,
+      value: "",
+    },
     {
       handle: "itemTypes",
-      jsonSchema: s.array(s.stringEnum(["file", "folder"]), { minItems: 1, uniqueItems: true }),
+      jsonSchema: {
+        type: "array",
+        items: {
+          type: "string",
+          enum: ["file", "folder"],
+        },
+        minItems: 1,
+        uniqueItems: true,
+      },
       nullable: false,
       value: ["file"],
     },
     {
+      handle: "parentFolderId",
+      jsonSchema: {
+        type: "string",
+      },
+      nullable: false,
+      value: "",
+    },
+    {
+      group: "Advanced settings",
+      collapsed: true,
+    },
+    {
       handle: "maxItemsPerPoll",
-      jsonSchema: s.integer({ maximum: 200, minimum: 1 }),
+      jsonSchema: {
+        type: "integer",
+        minimum: 1,
+        maximum: 200,
+      },
       nullable: false,
       value: 50,
     },
-    { handle: "parentFolderId", jsonSchema: s.string(), nullable: false, value: "" },
   ],
   definitionVersion: 2,
   description: "Polls the OneDrive change feed and triggers when a file or folder is created, updated or deleted.",

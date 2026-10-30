@@ -30,7 +30,7 @@ Before editing, read:
 - `CONTRIBUTING.md`.
 - `docs/catalog-format.md`.
 - Existing providers with similar auth and runtime shape under `src/providers`.
-- Shared provider helpers in `src/core/json-schema.ts`, `src/core/cast.ts`, `src/core/request.ts`, `src/core/types.ts`, and `src/providers/provider-runtime.ts`.
+- Shared provider helpers in `src/core/json-schema.ts`, `src/core/cast.ts`, `src/core/request.ts`, `src/core/types.ts`, `src/providers/provider-runtime.ts`, `src/providers/provider-executors.ts`, `src/providers/provider-credentials.ts`, `src/providers/provider-proxy.ts`, and `src/providers/provider-files.ts`.
 
 When the provider has official API documentation, use it as the source of truth for endpoints, auth, pagination, request bodies, response envelopes, limits, and error behavior. If you also have a reference implementation, compare it against the official docs instead of copying it blindly.
 
@@ -110,11 +110,13 @@ Verify RFC 8707 resource indicators independently at the authorization and token
 
 Add `credentialValidators` in `executors.ts` when the provider can cheaply verify credentials and return a useful `CredentialProfile`. Use a stable account id and readable display name when the provider exposes them.
 
+If a chat channel must verify inbound events (`/v1/providers/<service>/events/verify`), do not add a route. Write one `ChannelEventVerifier`, register it in `src/server/event-verification/registry.ts`, and follow the checklist in [docs/channel-event-verification.md](../../../docs/channel-event-verification.md#adding-a-channel).
+
 ## Executors
 
 Create or update `executors.ts` with `ProviderExecutors`:
 
-- Use `defineProviderExecutors` from `src/providers/provider-runtime.ts`.
+- Use `defineProviderExecutors` from `src/providers/provider-executors.ts`.
 - Prefer `defineApiKeyProviderExecutors`, `defineOAuthProviderExecutors`, or `defineBearerProviderExecutors` when their context shape fits.
 - Resolve credentials through `ExecutionContext` or the shared credential helpers.
 - Type a complete static handler map as `ProviderActionHandlers<typeof service, Handler>` so missing, misspelled, and extra action names fail typechecking.

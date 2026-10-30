@@ -1,4 +1,4 @@
-import type { ActionDefinition, JsonSchema, ProviderDefinition } from "../../core/types.ts";
+import type { ActionDefinition, JsonSchema } from "../../core/types.ts";
 
 import { z } from "zod";
 import { jsonSchema } from "../../core/json-schema.ts";
@@ -34,9 +34,9 @@ export type OpenApiDocument = {
 /**
  * Controls how much provider action detail is embedded in the OpenAPI document.
  */
-export type OpenApiDocumentOptions = {
-  actionId?: string;
-};
+export interface OpenApiDocumentOptions {
+  action?: ActionDefinition;
+}
 
 const errorPayloadSchema = jsonSchema.object(
   {
@@ -189,7 +189,22 @@ const idempotencyKeyParameter = {
 const idempotencyConflictDescription =
   "For idempotency, idempotency_request_in_progress means the original request is still running or its outcome is uncertain, while idempotency_key_conflict means the key was reused for a different action, input, effective connection, or stored runtime token. Other runtime conflicts may return their own error code with the same status.";
 
+const notionConnectionSchema = jsonSchema.optional(
+  jsonSchema.object(
+    {
+      duplicatedTemplateId: jsonSchema.string({
+        description: "Page ID duplicated during Notion OAuth authorization. Preserved during token refresh.",
+      }),
+    },
+    {
+      description: "Present only for Notion OAuth connections with a duplicated template ID.",
+      additionalProperties: false,
+    },
+  ),
+);
+
 const runtimeConnectionProperties: Record<string, JsonSchema> = {
+  notion: notionConnectionSchema,
   id: jsonSchema.string({ description: "Stable local connection identifier." }),
   providerAccountId: jsonSchema.string({
     description: "Provider account identity from the stored credential profile.",
@@ -222,15 +237,11 @@ const runtimeConnectionProperties: Record<string, JsonSchema> = {
  *
  * The action catalog remains the source of truth for provider-specific input
  * and output schemas. The default document stays compact and exposes one
- * generic run creation route. Pass `actionId` to embed one concrete action schema for
+ * generic run creation route. Pass `action` to embed one concrete action schema for
  * tool importers that need a small strongly typed OpenAPI document.
  */
-export function createOpenApiDocument(
-  providers: ProviderDefinition[],
-  options: OpenApiDocumentOptions = {},
-): OpenApiDocument {
-  const actions = providers.flatMap((provider) => provider.actions);
-  const concreteAction = options.actionId ? actions.find((action) => action.id === options.actionId) : undefined;
+export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): OpenApiDocument {
+  const concreteAction = options.action;
   const runPath = createRunPath();
   if (concreteAction) {
     runPath.post = createConcreteRunOperation(concreteAction);
@@ -454,6 +465,120 @@ export function createOpenApiDocument(
             runtimeFailureSchema(),
             "webhook_request_too_large: the Slack request body exceeds 64 KiB.",
           ),
+          500: jsonResponse(runtimeFailureSchema(), "Internal verification failure."),
+        },
+      },
+    },
+    "/v1/providers/microsoft_teams_bot/events/verify": {
+      post: {
+        tags: ["Triggers"],
+        summary: "Verify an inbound Microsoft Teams bot activity.",
+        description:
+          "Requires the dedicated OOMOL_CONNECT_EVENT_VERIFY_TOKEN in Authorization. The activity's own Bot Framework bearer token is forwarded in x-botframework-authorization and checked against the selected microsoft_teams_bot connection's Application (client) ID. The token must use RS256, match the Bot Framework issuer and audience, be current, and name the activity's documented Bot Connector serviceUrl. The token does not sign the activity body. No event is stored or scheduled.",
+        security: [{ eventVerificationToken: [] }],
+        parameters: [
+          { name: "x-botframework-authorization", in: "header", required: true, schema: jsonSchema.string() },
+          ...namedConnectionParameters,
+        ],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object", additionalProperties: true } } },
+        },
+        responses: {
+          200: jsonResponse(
+            runtimeSuccessSchema({
+              type: "object",
+              properties: {
+                valid: { type: "boolean", const: true },
+                appId: { type: "string" },
+                tenantId: jsonSchema.nullableString("Microsoft Entra tenant ID from the verified activity."),
+                serviceUrl: { type: "string" },
+                activityId: jsonSchema.nullableString("Activity ID from the verified activity."),
+                conversationId: jsonSchema.nullableString("Conversation ID from the verified activity."),
+                aadObjectId: jsonSchema.nullableString(
+                  "Sender's Microsoft Entra object ID from the verified activity.",
+                ),
+                channelId: jsonSchema.nullableString("Channel named by the verified activity."),
+              },
+              required: [
+                "valid",
+                "appId",
+                "tenantId",
+                "serviceUrl",
+                "activityId",
+                "conversationId",
+                "aadObjectId",
+                "channelId",
+              ],
+            }),
+          ),
+          400: jsonResponse(runtimeFailureSchema(), "invalid_event_payload: invalid JSON or missing serviceUrl."),
+          401: jsonResponse(
+            runtimeFailureSchema(),
+            "unauthorized, invalid_webhook_signature, or invalid_webhook_timestamp.",
+          ),
+          403: jsonResponse(runtimeFailureSchema(), "webhook_app_mismatch: the token audience is a different bot."),
+          404: jsonResponse(
+            runtimeFailureSchema(),
+            "event_verification_disabled, or the selected connection does not exist.",
+          ),
+          409: jsonResponse(
+            runtimeFailureSchema(),
+            "event_verification_not_configured: no Microsoft Teams Bot connection with an Application (client) ID.",
+          ),
+          413: jsonResponse(runtimeFailureSchema(), "webhook_request_too_large: the body exceeds 64 KiB."),
+          502: jsonResponse(runtimeFailureSchema(), "event_verification_unavailable: signing keys unreachable."),
+          500: jsonResponse(runtimeFailureSchema(), "Internal verification failure."),
+        },
+      },
+    },
+    "/v1/providers/feishu_app_bot/events/verify": {
+      post: {
+        tags: ["Triggers"],
+        summary: "Verify and decrypt an inbound Feishu event.",
+        description:
+          "Requires the dedicated OOMOL_CONNECT_EVENT_VERIFY_TOKEN in Authorization. The selected feishu_app_bot connection must contain appId, verificationToken and encryptKey. Signed callers must forward the exact original request bytes; re-serializing the JSON body changes the signed content and fails verification. The route validates the Feishu token and required signature, decrypts encrypted envelopes, and returns the trusted decrypted payload. Only URL verification challenges may omit signing headers. No event is stored or scheduled.",
+        security: [{ eventVerificationToken: [] }],
+        parameters: [
+          { name: "x-lark-request-timestamp", in: "header", required: false, schema: jsonSchema.string() },
+          { name: "x-lark-request-nonce", in: "header", required: false, schema: jsonSchema.string() },
+          { name: "x-lark-signature", in: "header", required: false, schema: jsonSchema.string() },
+          ...namedConnectionParameters,
+        ],
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: { type: "object", additionalProperties: true } } },
+        },
+        responses: {
+          200: jsonResponse(
+            runtimeSuccessSchema({
+              type: "object",
+              properties: {
+                valid: { type: "boolean", const: true },
+                appId: { type: "string" },
+                tenantKey: { type: "string" },
+                challenge: jsonSchema.optional(jsonSchema.string()),
+                payload: jsonSchema.optional({ type: "object", additionalProperties: true }),
+                signatureVerified: { type: "boolean" },
+              },
+              required: ["valid", "appId", "tenantKey", "signatureVerified"],
+            }),
+          ),
+          400: jsonResponse(runtimeFailureSchema(), "invalid_event_payload."),
+          401: jsonResponse(
+            runtimeFailureSchema(),
+            "unauthorized, invalid_webhook_signature, or invalid_webhook_timestamp.",
+          ),
+          403: jsonResponse(runtimeFailureSchema(), "webhook_app_mismatch."),
+          404: jsonResponse(
+            runtimeFailureSchema(),
+            "event_verification_disabled, or the selected connection does not exist.",
+          ),
+          409: jsonResponse(
+            runtimeFailureSchema(),
+            "event_verification_not_configured: appId, verificationToken or encryptKey is missing.",
+          ),
+          413: jsonResponse(runtimeFailureSchema(), "webhook_request_too_large: the body exceeds 64 KiB."),
           500: jsonResponse(runtimeFailureSchema(), "Internal verification failure."),
         },
       },
@@ -717,6 +842,7 @@ export function createOpenApiDocument(
             service: jsonSchema.string({ description: "Provider service identifier." }),
             authType: jsonSchema.string({ description: "Connection authentication type." }),
             configured: jsonSchema.boolean({ description: "Whether the provider is connected." }),
+            notion: notionConnectionSchema,
             oauthAuthorizationId: jsonSchema.string({
               description: "Completed OAuth consent state. Omitted for legacy and non-OAuth connections.",
             }),

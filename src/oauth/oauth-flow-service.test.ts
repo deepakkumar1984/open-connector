@@ -16,6 +16,7 @@ import { createHash } from "node:crypto";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createCatalogStore } from "../catalog-store.ts";
 import { ConnectionService } from "../connection-service.ts";
+import { provider as googleDriveProvider } from "../providers/googledrive/definition.ts";
 import { provider as slackProvider } from "../providers/slack/definition.ts";
 import { provider as slackbotProvider } from "../providers/slackbot/definition.ts";
 import { executors as slackbotExecutors } from "../providers/slackbot/executors.ts";
@@ -1262,6 +1263,7 @@ describe("OAuthFlowService", () => {
   });
 
   it("stores the token returned by a provider OAuth runtime", async () => {
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString();
     let callbackParameters: Record<string, string> | undefined;
     let callbackQuery: string | undefined;
     let callbackState: string | undefined;
@@ -1275,7 +1277,7 @@ describe("OAuthFlowService", () => {
             accessToken: "provider-access-token",
             refreshToken: "provider-access-token",
             tokenType: "Bearer",
-            expiresAt: "2026-10-30T00:00:00.000Z",
+            expiresAt,
             providerSecret: { inventory: "provider-owned" },
             metadata: { permissions: "read,write" },
           };
@@ -1301,7 +1303,7 @@ describe("OAuthFlowService", () => {
       authType: "oauth2",
       accessToken: "provider-access-token",
       refreshToken: "provider-access-token",
-      expiresAt: "2026-10-30T00:00:00.000Z",
+      expiresAt,
       providerSecret: { inventory: "provider-owned" },
       metadata: { permissions: "read,write" },
     });
@@ -1535,3 +1537,22 @@ it.each(["cloud_recording:read:recording", "cloud_recording:read:recording:admin
     ]);
   },
 );
+
+it("requests only drive.file when selected and preserves default Drive authorization", async () => {
+  const services = createServices([{ ...googleDriveProvider, actions: [] }]);
+  await services.clientConfigs.upsertConfig({ service: "googledrive", clientId: "client", clientSecret: "secret" });
+  const full = await services.flow.startAuthorization({ service: "googledrive" });
+  expect(new URL(full.authorizationUrl).searchParams.get("scope")!.split(" ")).toEqual([
+    "https://www.googleapis.com/auth/drive.readonly",
+    "https://www.googleapis.com/auth/drive.metadata.readonly",
+    "https://www.googleapis.com/auth/drive",
+  ]);
+  await services.clientConfigs.upsertConfig({
+    service: "googledrive",
+    clientId: "client",
+    clientSecret: "secret",
+    requestedScopes: ["https://www.googleapis.com/auth/drive.file"],
+  });
+  const narrow = await services.flow.startAuthorization({ service: "googledrive" });
+  expect(new URL(narrow.authorizationUrl).searchParams.get("scope")).toBe("https://www.googleapis.com/auth/drive.file");
+});

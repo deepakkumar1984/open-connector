@@ -26,14 +26,24 @@ export const snapshot: TriggerKeySnapshot & { readonly type: "poll" } = {
   configInputs: [
     {
       handle: "teamId",
-      jsonSchema: { ...s.string({ pattern: uuidPattern }), title: "Team ID" },
+      jsonSchema: {
+        type: "string",
+        pattern: uuidPattern,
+        title: "Team ID",
+      },
       nullable: false,
       description: "Linear Team UUID. Use Copy model UUID in Linear to find it.",
     },
     {
       handle: "stateIds",
       jsonSchema: {
-        ...s.array(s.string({ pattern: uuidPattern }), { uniqueItems: true, maxItems: 50 }),
+        type: "array",
+        items: {
+          type: "string",
+          pattern: uuidPattern,
+        },
+        maxItems: 50,
+        uniqueItems: true,
         title: "Issue statuses",
       },
       nullable: false,

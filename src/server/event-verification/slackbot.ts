@@ -1,7 +1,53 @@
-import { verifySlackSignature } from "../triggers/sources/slack-signature.ts";
+import type { ChannelEventVerifier } from "./contract.ts";
 
-/** Maximum request body size, consistent with existing event sources. */
-const slackEventMaximumBodyBytes: number = 64 * 1024;
+import { optionalString } from "../../core/cast.ts";
+import { verifySlackSignature } from "../../triggers/sources/slack-signature.ts";
+import { eventRequestMaximumBodyBytes } from "./request-body.ts";
+
+interface SlackApplicationCredential {
+  appId: string;
+  signingSecret: string;
+}
+
+const rejectionMessages = {
+  body_too_large: "Slack request body exceeds 64 KiB.",
+  payload: "Invalid Slack event envelope.",
+  app: "Slack App ID does not match the configured application.",
+  timestamp: "Invalid or expired Slack request timestamp.",
+  signature: "Invalid Slack request signature.",
+};
+
+/**
+ * Slack signs every delivery of one Slack App with that app's Signing Secret,
+ * across all workspaces it is installed in, so the secret is read from the
+ * deployment-default slackbot OAuth application rather than a connection.
+ */
+export const slackbotEventVerifier: ChannelEventVerifier<SlackApplicationCredential> = {
+  credentialScope: "application",
+  messages: {
+    notConfigured: "Configure the default Slack App ID and Signing Secret.",
+    bodyTooLarge: rejectionMessages.body_too_large,
+  },
+  readCredential({ applicationConfig }) {
+    const appId = optionalString(applicationConfig?.extra.appId);
+    const signingSecret = optionalString(applicationConfig?.secretExtra.signingSecret);
+    return appId && signingSecret ? { appId, signingSecret } : undefined;
+  },
+  async verify(request, credential) {
+    const result = await verifySlackEventRequest({
+      timestamp: request.headers.get("x-slack-request-timestamp") ?? "",
+      signature: request.headers.get("x-slack-signature") ?? "",
+      rawBody: request.rawBody,
+      configuredAppId: credential.appId,
+      signingSecret: credential.signingSecret,
+      contentType: request.headers.get("content-type") ?? "",
+      now: request.now,
+    });
+    return result.valid
+      ? { verified: true, result }
+      : { verified: false, reason: result.reason, message: rejectionMessages[result.reason] };
+  },
+};
 
 export interface SlackEventVerificationInput {
   /** Value of the X-Slack-Request-Timestamp header. */
@@ -28,47 +74,6 @@ export type SlackEventVerificationResult =
     };
 
 /**
- * Reads a request body without buffering more than the Slack event limit.
- *
- * Returns undefined when the request exceeds the limit. The actual stream size is
- * enforced even when Content-Length is absent or understated.
- */
-export async function readSlackEventRequestBody(request: Request): Promise<Uint8Array | undefined> {
-  const declaredLength = request.headers.get("content-length");
-  if (declaredLength && /^\d+$/.test(declaredLength) && Number(declaredLength) > slackEventMaximumBodyBytes) {
-    return undefined;
-  }
-  if (!request.body) return new Uint8Array();
-
-  const reader = request.body.getReader();
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      if (!value) continue;
-      totalBytes += value.byteLength;
-      if (totalBytes > slackEventMaximumBodyBytes) {
-        await reader.cancel().catch(() => undefined);
-        return undefined;
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-
-  const body = new Uint8Array(totalBytes);
-  let offset = 0;
-  for (const chunk of chunks) {
-    body.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  return body;
-}
-
-/**
  * Verifies the signature, timestamp window, and App ID of an inbound Slack request.
  *
  * Verification only: this function does not persist, deduplicate, or schedule events.
@@ -77,7 +82,7 @@ export async function verifySlackEventRequest(
   input: SlackEventVerificationInput,
 ): Promise<SlackEventVerificationResult> {
   const now = input.now ?? Date.now();
-  if (input.rawBody.byteLength > slackEventMaximumBodyBytes) {
+  if (input.rawBody.byteLength > eventRequestMaximumBodyBytes) {
     return { valid: false, reason: "body_too_large" };
   }
   const reason = await verifySlackSignature({ ...input, now });

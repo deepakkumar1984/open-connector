@@ -40,11 +40,11 @@ const provider: ProviderDefinition = {
 describe("action execution OpenAPI", () => {
   it.each([
     ["generic", {}],
-    ["concrete", { actionId: "example.echo" }],
+    ["concrete", { action: provider.actions[0] }],
   ] satisfies Array<[string, OpenApiDocumentOptions]>)(
     "documents idempotent retries for the %s operation",
     (_name, options) => {
-      const document = createOpenApiDocument([provider], options);
+      const document = createOpenApiDocument(options);
       const path = document.paths["/v1/actions/{actionId}"] as { post: RunOperation };
 
       expect(path.post.parameters).toContainEqual({
@@ -83,7 +83,7 @@ describe("action execution OpenAPI", () => {
   );
 
   it("documents the same runtime statuses on both /v1 execution routes", () => {
-    const document = createOpenApiDocument([provider]);
+    const document = createOpenApiDocument();
     const documentedStatuses = (path: string): string[] =>
       Object.keys((document.paths[path] as { post: { responses: Record<string, unknown> } }).post.responses);
 
@@ -98,7 +98,7 @@ describe("action execution OpenAPI", () => {
   });
 
   it("documents the provider setup route as an administrator route", () => {
-    const document = createOpenApiDocument([provider]);
+    const document = createOpenApiDocument();
     const setup = document.paths["/v1/providers/{service}/setup"] as {
       get: { tags: string[]; description: string; responses: Record<string, unknown> };
     };
@@ -109,7 +109,7 @@ describe("action execution OpenAPI", () => {
   });
 
   it("documents public /v1 catalog routes with the runtime envelope", () => {
-    const document = createOpenApiDocument([provider]);
+    const document = createOpenApiDocument();
     const search = document.paths["/v1/actions/search"] as {
       get: {
         responses: Record<string, { content?: { "application/json"?: { schema?: { required?: string[] } } } }>;
@@ -175,7 +175,7 @@ describe("action execution OpenAPI", () => {
   });
 
   it("documents Runtime and token policy management and run audit metadata", () => {
-    const document = createOpenApiDocument([provider]);
+    const document = createOpenApiDocument();
     const runtimePolicyPath = document.paths["/api/runtime-policy"] as {
       get: { responses: Record<string, unknown> };
       put: { responses: Record<string, unknown> };
@@ -224,7 +224,7 @@ describe("action execution OpenAPI", () => {
   });
 
   it("documents stored-token connection IDs without changing deployment PolicyRules", () => {
-    const document = createOpenApiDocument([provider]);
+    const document = createOpenApiDocument();
     const tokenSummary = document.components.schemas.RuntimeTokenSummary as {
       required: string[];
       properties: Record<string, ConnectionGrantSchema>;
@@ -276,7 +276,7 @@ interface ConnectionGrantSchema {
 
 describe("Slack verification contract", () => {
   it("documents dedicated bearer authentication and runtime response envelopes", () => {
-    const document = createOpenApiDocument([provider]);
+    const document = createOpenApiDocument();
     const route = document.paths["/v1/providers/slackbot/events/verify"] as {
       post: {
         security: unknown;
@@ -297,5 +297,82 @@ describe("Slack verification contract", () => {
       expect(properties).toHaveProperty("data");
       if (status !== 200) expect(properties).toHaveProperty("errorCode");
     }
+  });
+});
+
+describe("Teams verification contract", () => {
+  it("documents trusted activity identifiers", () => {
+    const document = createOpenApiDocument();
+    const route = document.paths["/v1/providers/microsoft_teams_bot/events/verify"] as {
+      post: {
+        description: string;
+        responses: Record<
+          string,
+          {
+            content: {
+              "application/json": {
+                schema: {
+                  properties: Record<
+                    string,
+                    { required?: string[]; properties?: Record<string, { anyOf?: Array<Record<string, unknown>> }> }
+                  >;
+                };
+              };
+            };
+          }
+        >;
+      };
+    };
+    const data = route.post.responses["200"]!.content["application/json"].schema.properties.data!;
+    expect(route.post.description).toMatch(/Bot Connector/i);
+    expect(data.required).toEqual([
+      "valid",
+      "appId",
+      "tenantId",
+      "serviceUrl",
+      "activityId",
+      "conversationId",
+      "aadObjectId",
+      "channelId",
+    ]);
+    for (const field of ["tenantId", "activityId", "conversationId", "aadObjectId"]) {
+      expect(data.properties![field]).toMatchObject({
+        anyOf: [{ type: "string" }, { type: "null" }],
+      });
+    }
+  });
+});
+
+describe("Feishu verification contract", () => {
+  it("documents dedicated authentication and the trusted decrypted payload", () => {
+    const document = createOpenApiDocument();
+    const route = document.paths["/v1/providers/feishu_app_bot/events/verify"] as {
+      post: {
+        description: string;
+        parameters: Array<{ name: string; in: string; required?: boolean }>;
+        security: unknown;
+        responses: Record<
+          string,
+          {
+            content: {
+              "application/json": {
+                schema: { properties: Record<string, { required?: string[] }> };
+              };
+            };
+          }
+        >;
+      };
+    };
+    expect(route.post.security).toEqual([{ eventVerificationToken: [] }]);
+    expect(route.post.description).toMatch(/exact original request bytes/i);
+    expect(route.post.parameters).toEqual(
+      expect.arrayContaining([
+        { name: "x-lark-request-timestamp", in: "header", required: false, schema: expect.anything() },
+        { name: "x-lark-request-nonce", in: "header", required: false, schema: expect.anything() },
+        { name: "x-lark-signature", in: "header", required: false, schema: expect.anything() },
+      ]),
+    );
+    const data = route.post.responses["200"]!.content["application/json"].schema.properties.data!;
+    expect(data.required).toEqual(["valid", "appId", "tenantKey", "signatureVerified"]);
   });
 });

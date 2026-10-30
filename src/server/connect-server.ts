@@ -25,8 +25,8 @@ import { compress } from "hono/compress";
 import { ActionPolicyService } from "../core/action-policy.ts";
 import { createActionSearchIndexProvider } from "../core/action-search.ts";
 import { optionalRecord } from "../core/cast.ts";
-import { withProviderHttpDispatch } from "../core/provider-http-dispatch.ts";
-import { withProviderNetworkPolicy } from "../core/provider-network-policy.ts";
+import { ExecutionError } from "../core/execution-error.ts";
+import { withRuntimeExecution } from "../core/runtime-execution.ts";
 import { ProviderDispatchRequestError, toProviderExecutionError } from "../providers/provider-runtime.ts";
 import { SaasError } from "../saas/saas-client.ts";
 import { ActionRunner } from "./actions/action-runner.ts";
@@ -36,12 +36,14 @@ import { createConnectionRoutes } from "./api/connection-routes.ts";
 import { createConsoleCatalogRoutes } from "./api/console-catalog-routes.ts";
 import { createConsoleOAuthRoutes } from "./api/console-oauth-routes.ts";
 import { createDocsRoutes, loadDocsHandler } from "./api/docs-routes.ts";
+import { createEventVerificationRoutes } from "./api/event-verification-routes.ts";
 import { HttpRequestError, internalError, jsonError, notFound } from "./api/http-utils.ts";
 import { createMarketplaceRoutes } from "./api/marketplace-routes.ts";
 import { createMcpRoutes, loadMcpModule } from "./api/mcp-routes.ts";
 import { createPolicyRoutes } from "./api/policy-routes.ts";
 import { createPolicySnapshotProvider } from "./api/policy-snapshot.ts";
 import { createRunLogRoutes } from "./api/run-log-routes.ts";
+import { executionFailureStatus } from "./api/runtime-api.ts";
 import { writeRuntimeFailure, writeRuntimeSuccess } from "./api/runtime-api.ts";
 import { createRuntimeAppRoutes } from "./api/runtime-app-routes.ts";
 import { createRuntimeCatalogRoutes } from "./api/runtime-catalog-routes.ts";
@@ -51,7 +53,6 @@ import { createSaasProjectRoutes } from "./api/saas-project-routes.ts";
 import { createTransitFileRoutes } from "./api/transit-file-routes.ts";
 import { createTriggerRoutes } from "./api/trigger-routes.ts";
 import { ProxyRunner } from "./proxy/proxy-runner.ts";
-import { readSlackEventRequestBody, verifySlackEventRequest } from "./slack-event-verification.ts";
 
 /**
  * Import and evaluate the modules the /mcp and /docs routes defer to their first request. The Node server never
@@ -118,6 +119,7 @@ export class ConnectServer {
     this.actionSearch = options.actionSearch ?? createActionSearchIndexProvider(options.catalog.actions);
     this.actionPolicy = options.actionPolicy ?? new ActionPolicyService();
     this.proxyRunner = new ProxyRunner({
+      network: options.network,
       providerHttpDispatch: options.providerHttpDispatch,
       catalog: options.catalog,
       providerLoader: options.providerLoader,
@@ -137,9 +139,7 @@ export class ConnectServer {
     const auth = this.options.auth ?? {};
 
     app.use("*", async (_context, next) => {
-      await withProviderNetworkPolicy(this.options.network ?? {}, () =>
-        withProviderHttpDispatch({ operation: "runtime" }, next, this.options.providerHttpDispatch),
-      );
+      await withRuntimeExecution(this.options, { operation: "runtime" }, next);
     });
 
     app.use("*", async (context, next) => {
@@ -166,84 +166,14 @@ export class ConnectServer {
     }
     app.use("*", createLocalAuthMiddleware(auth));
 
-    // Inbound provider event verification. This route authenticates with a dedicated token
-    // so a host ingress can delegate signature verification without receiving the admin token.
-    app.post("/v1/providers/slackbot/events/verify", async (context) => {
-      const expected = this.options.eventVerifyToken?.trim();
-      if (!expected)
-        return writeRuntimeFailure(context, {
-          status: 404,
-          errorCode: "event_verification_disabled",
-          message: "Event verification is disabled.",
-        });
-      const authorization = context.req.header("authorization") ?? "";
-      const provided = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
-      if (!(await sameSecret(provided, expected)))
-        return writeRuntimeFailure(context, {
-          status: 401,
-          errorCode: "unauthorized",
-          message: "A valid event verification token is required.",
-        });
-      const config = await this.options.oauthClientConfigs.getConfig("slackbot");
-      const appId = String(config?.extra?.appId ?? "").trim();
-      const signingSecret = String(config?.secretExtra?.signingSecret ?? "").trim();
-      if (!appId || !signingSecret)
-        return writeRuntimeFailure(context, {
-          status: 409,
-          errorCode: "event_verification_not_configured",
-          message: "Configure the default Slack App ID and Signing Secret.",
-        });
-      const rawBody = await readSlackEventRequestBody(context.req.raw);
-      if (!rawBody)
-        return writeRuntimeFailure(context, {
-          status: 413,
-          errorCode: "webhook_request_too_large",
-          message: "Slack request body exceeds 64 KiB.",
-        });
-      const result = await verifySlackEventRequest({
-        timestamp: context.req.header("x-slack-request-timestamp") ?? "",
-        signature: context.req.header("x-slack-signature") ?? "",
-        rawBody,
-        configuredAppId: appId,
-        signingSecret,
-        contentType: context.req.header("content-type") ?? "",
-      });
-      if (!result.valid) {
-        switch (result.reason) {
-          case "body_too_large":
-            return writeRuntimeFailure(context, {
-              status: 413,
-              errorCode: "webhook_request_too_large",
-              message: "Slack request body exceeds 64 KiB.",
-            });
-          case "payload":
-            return writeRuntimeFailure(context, {
-              status: 400,
-              errorCode: "invalid_event_payload",
-              message: "Invalid Slack event envelope.",
-            });
-          case "app":
-            return writeRuntimeFailure(context, {
-              status: 403,
-              errorCode: "webhook_app_mismatch",
-              message: "Slack App ID does not match the configured application.",
-            });
-          case "timestamp":
-            return writeRuntimeFailure(context, {
-              status: 401,
-              errorCode: "invalid_webhook_timestamp",
-              message: "Invalid or expired Slack request timestamp.",
-            });
-          case "signature":
-            return writeRuntimeFailure(context, {
-              status: 401,
-              errorCode: "invalid_webhook_signature",
-              message: "Invalid Slack request signature.",
-            });
-        }
-      }
-      return writeRuntimeSuccess(context, result);
-    });
+    app.route(
+      "/v1",
+      createEventVerificationRoutes({
+        connections: this.options.connections,
+        oauthClientConfigs: this.options.oauthClientConfigs,
+        eventVerifyToken: this.options.eventVerifyToken,
+      }),
+    );
 
     // Health and runtime discovery / execution endpoints
     app.get("/v1/health", (context) => writeRuntimeSuccess(context, { ok: true, runtime: "connectors" }));
@@ -302,7 +232,7 @@ export class ConnectServer {
     app.route(
       "/",
       createDocsRoutes({
-        providers: this.options.catalog.providers,
+        catalog: this.options.catalog,
         publicOrigin: this.options.publicOrigin,
         serveDocumentation: this.options.serveDocumentation,
       }),
@@ -412,15 +342,16 @@ export class ConnectServer {
           error.status,
         );
       }
-      if (error instanceof HttpRequestError) {
+      if (error instanceof HttpRequestError || error instanceof ExecutionError) {
+        const status = error instanceof ExecutionError ? executionFailureStatus(error.kind) : error.status;
         if (context.req.path.startsWith("/v1/")) {
           return writeRuntimeFailure(context, {
-            status: error.status,
+            status,
             errorCode: error.code,
             message: error.message,
           });
         }
-        return jsonError(context, error.status, error.code, error.message);
+        return jsonError(context, status, error.code, error.message);
       }
       this.options.logger?.error(
         {
@@ -442,19 +373,4 @@ export class ConnectServer {
 
     return app;
   }
-}
-
-/** Hash both values before a constant-time comparison so length never leaks. */
-async function sameSecret(provided: string, expected: string): Promise<boolean> {
-  if (!provided || !expected) return false;
-  const encoder = new TextEncoder();
-  const [left, right] = await Promise.all([
-    crypto.subtle.digest("SHA-256", encoder.encode(provided)),
-    crypto.subtle.digest("SHA-256", encoder.encode(expected)),
-  ]);
-  const a = new Uint8Array(left);
-  const b = new Uint8Array(right);
-  let difference = 0;
-  for (let index = 0; index < a.length; index += 1) difference |= a[index]! ^ b[index]!;
-  return difference === 0;
 }
