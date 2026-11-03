@@ -69,6 +69,31 @@ limitations.
 Admin endpoints under `/api/*`, `/docs`, and the Web Console use `OOMOL_CONNECT_ADMIN_TOKEN` when it
 is configured.
 
+## Provider Display Languages
+
+Provider lists, details and credential setup support `?locale=en` and `?locale=zh-CN`:
+
+- `GET /api/providers`
+- `GET /api/providers/{service}`
+- `GET /v1/providers`
+- `GET /v1/providers/{service}/setup`
+
+An explicit `locale` takes precedence over `Accept-Language`. Without it, the server selects a supported language from the header's weighted preferences. Simplified Chinese variants such as `zh-Hans` resolve to `zh-CN`; traditional Chinese does not resolve to simplified Chinese. Unsupported languages use English. `Content-Language` identifies the selected language, and missing translations fall back to the original text field by field.
+
+```bash
+curl 'http://localhost:3000/api/providers/tencent_meeting_mcp?locale=zh-CN'
+curl 'http://localhost:3000/v1/providers/tencent_meeting_mcp/setup' \
+  -H 'Accept-Language: zh-CN, en;q=0.5'
+```
+
+Only display text is localized: provider names and descriptions, credential labels, placeholders and help, OAuth option labels and registration steps. Service IDs, credential keys, category IDs, scopes, URLs, default values, action schemas and execution contracts are unchanged. `/api/providers` and its detail endpoint keep `categories` as stable strings and add `categoryDisplayNames` to translated responses. `/v1/providers` retains category objects with stable `id` and translated `displayName`.
+
+The console requests its selected language explicitly and reloads provider metadata when the language changes. Catalog ETags represent the localized content. Header-negotiated console catalog responses use `Vary: Accept-Language` and disable CDN caching; explicit-locale URLs retain the existing catalog CDN policy. Runtime `/v1` endpoints remain `no-store`.
+
+Chinese coverage currently includes shared generated credential labels, existing catalog categories, and provider-specific text for Tencent Meeting MCP, OpenAI, GitHub, Slack, Gmail, Google Drive, Google Calendar, Feishu, Feishu App Bot, Box, Dokploy, Airtable, Notion and Football Charts. GitHub authentication help, all Slack authorization-option labels and descriptions, and the three Google services' service-account setup text have been translated individually against their provider definitions. Brand names without a Chinese display-name translation and literal credential examples retain their original form. Another individually reviewed batch covers DeepSeek, Qwen, Baidu Qianfan, MiniMax, DingTalk Bot, DingTalk MCP, WeCom Bot, WeCom MCP, Feishu Custom Bot, Tencent Docs, Gitee and AMap. Provider-specific coverage is incremental; untranslated fields remain in their original language. Action documentation and schemas are not translated.
+
+Each Chinese provider translation lives in `src/catalog-localization/zh-CN/<service>.ts`. The `src/catalog-localization/zh-CN.ts` catalog owns shared labels and categories and explicitly registers these translations. To add a provider translation, create its file with a typed `translation` export and register it in that catalog. `npm run generate:catalog` checks translation references against the provider definitions. Run `node scripts/check-catalog-translations.ts` to list providers without provider-specific Chinese entries. This list measures entry coverage, not whether every field of an entry has been translated.
+
 ## Provider Triggers
 
 Provider Triggers run through registered server operations:
@@ -110,6 +135,64 @@ Webhook reconciliation uses:
 The response contains an opaque `subscription.id`; remote hook IDs, callback secrets and provider state stay on the server. A request key belongs to one runtime token, connection, provider account and Trigger. Its active configuration and HTTPS callback are immutable. Pass that ID with the same request key, configuration and callback for later reconciliation; `active: false` cancels it. After cancellation the same key can be rebuilt with a fresh callback nonce and secret. An abandoned key requires a new binding key.
 
 `receive` requires `subscriptionId`, HTTP `method`, string `headers` and `query`, base64 `rawBody`, and boolean `admit` / `current`. Header names are normalized. The callback's `connector_subscription` nonce must match, and the provider implementation verifies its own signature or secret. Raw bodies are limited to 64 KiB; the enclosing JSON request is limited to 160 KiB. Open Flow owns public ingress, event scheduling, business checkpoints and deduplication. Feishu shared event ingress stays in Open Flow; its Connector `resource` operation only manages native resource subscriptions and reference counts.
+
+Shared event Source Triggers keep their provider configuration and secrets in Connector through the `sourceReference` operation: `feishu_app_bot.on_event`, `fireflies.on_meeting_ready`, `intercom.on_conversation_event`, `jira.on_issue_event`, `microsoft_teams_bot.on_activity`, `sentry.on_issue_alert`, `slackbot.on_event` and `zoom.on_recording_ready`. `create` takes a `deploymentId`, a caller-chosen `requestKey` and the provider `input`. It returns `source.reference` (`applicationId`, `sourceId`) for later `get`, `update`, `prepare`, `receive`, `resource` and `delete` calls. Repeating `create` with the same key and input returns the same Source, while different input under that key is refused with a conflict. Connector adds `kind`, `version`, `name`, `connectionId` and `teamId` itself and rejects them in `input`. Invalid input answers `invalid_input` and names each failing field. Sentry, Slack, Microsoft Teams, Intercom and Zoom deliveries arrive for a whole application, so the host passes them to `route` with the reference's `applicationId` first. `route` returns the references that accept the delivery, and the host then calls `receive` for each one. `route` needs no connection selector, but the Sources of one application can belong to different connections, and `receive` answers `trigger_not_found` for a reference the selected connection does not own. Keep each reference's connection from `create` and select that connection with `x-oo-connector-app-id` for its `receive`.
+
+For `slackbot.on_event`, select a Slack Bot OAuth connection with `x-oo-connector-app-id` and send this `create` request:
+
+```json
+{
+  "operation": "sourceReference",
+  "request": {
+    "action": "create",
+    "deploymentId": "deployment-1",
+    "requestKey": "workspace-T0123ABCD",
+    "input": {
+      "appId": "A0123ABCD",
+      "workspaceId": "T0123ABCD",
+      "signingSecret": "<Slack app Signing Secret>",
+      "eventTypes": ["app_mention", "message.im", "block_actions", "view_submission"]
+    }
+  }
+}
+```
+
+`appId` is the Slack App ID (`A…`), `workspaceId` is the installed workspace ID (`T…`) and `signingSecret` is the app's Signing Secret. `eventTypes` lists one to five of `app_mention`, `message.im`, `block_actions`, `view_submission` and `view_closed`. No Slack Web API call is made: the bot user ID comes from the connection. Every Source of one Slack app shares one application and must use the same Signing Secret. `update` takes `reference`, `expectedRevision` and `input` with `eventTypes` and an optional replacement `signingSecret`. Replacing the secret clears readiness until the next `url_verification`.
+
+The `slackbot.on_event` shared application Source serves both the Slack app's Events API Request URL and its Interactivity Request URL. Point both settings at the same callback, or at two host routes that forward to the same Source `route` and `receive` operations, and enable Interactivity in the Slack app. Interactivity requests are form bodies whose `payload` field holds JSON. They are verified with the same Signing Secret and 300-second window over the raw form bytes, then normalized as `block_actions`, `view_submission` or `view_closed` events:
+
+- `deliveryId` is Slack's `trigger_id`. `view_closed` has none, so its `deliveryId` is `view_closed:<view id>`. Use `deliveryId` as the deduplication key.
+- Interaction outputs add `responseUrl`, `actions` (`actionId`, `blockId`, `type`, `value`, `selectedOption`, `actionTs`) and `view` (`id`, `callbackId`, `privateMetadata`, `state`, `isCleared`). `channel`, `text`, `ts` and `threadTs` come from the message that held the component and are `null` for interactions in modals or App Home. Message event payloads are unchanged and do not include the three new fields. `body` is the interaction payload without Slack's legacy verification `token`, the workflow `bot_access_token` and every interactor `secret`, whether in the top-level `interactivity` or in an interactivity value among `function_data.inputs`.
+- The new event types are opt-in: list them in the Source `eventTypes` and in each consumer's `eventTypes`. Existing consumers keep receiving only the types they listed.
+- When `route` returns references, answer Slack with an empty 200 response within three seconds; for `view_submission` that closes the submitted view. Interactions that no Source accepts, other interaction types and other form posts are answered by `route` with that empty 200.
+- The `url_verification` challenge comes only from the Events API Request URL, and a Source becomes ready only after it has answered one.
+- Interactions carry no bot authorization list and are not filtered for Slack Connect, so authorize the acting `user` before applying a decision.
+- A Source belongs to one workspace. Organization-wide installations, whose interaction payloads carry `team: null`, match no Source and are acknowledged without an event.
+
+`microsoft_teams_bot.on_activity` receives Microsoft Teams activities through a shared event Source that belongs to one Teams Bot connection. Select the connection with `x-oo-connector-app-id` and create the Source with `{ "operation": "sourceReference", "request": { "action": "create", "deploymentId": "...", "requestKey": "...", "input": { "eventTypes": ["message"] } } }`:
+
+- `eventTypes` lists one to four of `message`, `conversationUpdate`, `messageReaction` and `invoke`. The bot's Application ID comes from the connection, and no secret is stored.
+- Optional `tenantId`, a Microsoft Entra tenant ID, limits the Source to one organization. Use it when one multi-tenant bot serves several organizations, each with its own connection and Source on the same Application ID. The Source then acknowledges, without an event, every activity whose `conversation.tenantId` (or `channelData.tenant.id`) differs or is missing. The Source view shows the tenant, and a Source without one accepts every tenant. The connection's `tenantId` credential field cannot fill this in: it is the token authority, which is `botframework.com` for a multi-tenant bot, so pass the organization's tenant explicitly.
+- Every Source of one bot shares one application, derived from the bot's Application ID, because an Azure Bot has a single messaging endpoint. Set that endpoint to the application's callback URL. Forward each activity request's raw body and headers, including its own `Authorization`, to the `route` operation with the Source reference's `applicationId`. Then call `receive` for each reference it returns, selecting the connection that created that Source. With one connection per organization, each reference belongs to a different connection. When `route` returns no reference it returns the acknowledgement for Bot Framework, including for activity types no Source subscribes to. Deleting a Source that was never confirmed, by `requestKey` alone, also needs the bot's `appId`.
+- Every activity is verified with its Bot Framework token, using the same rules as `POST /v1/providers/microsoft_teams_bot/events/verify`. A token for another bot or an unverifiable token answers 401. Unreachable signing keys answer as a temporary provider failure, so the host can let Bot Framework retry.
+- The Source is ready as soon as it exists. Its `verifiedAt` records the first verified activity.
+- Other activity types, activities from other channels such as Web Chat, and types the Source does not subscribe to are acknowledged with 200 and no event. Answer Bot Framework with 200 for delivered events too. An `invoke` that expects a response body, such as an Adaptive Card action, needs that body from the host.
+- Consumers filter by `eventTypes`, optional `conversationIds` and optional `tenantId`. A channel ID also matches the channel's threads, whose conversation IDs add `;messageid=<root message>`.
+- Outputs:
+  - `event` is the activity type, and `deliveryId` is the JSON array `[conversation.id, activityId]`. Bot Framework retries keep both, so `deliveryId` is the deduplication key.
+  - `text` removes the bot's own `<at>` mention and unwraps the other mentions, while `rawText` keeps the original.
+  - `mentions` lists `id`, `name` and `isBot` for each mention entity.
+  - `from`, `conversation` (`id`, `conversationType`, `tenantId`), `channelData`, `replyToId`, `serviceUrl` and `timestamp` come from the activity, and `body` is the whole activity.
+  - `name` and `value` are the activity's own fields: `name` is set on an invoke such as `adaptiveCard/action`, and `value` holds the object an Adaptive Card action submits, on an invoke or on an `Action.Submit` message. Each is `null` when the activity has none, and `value` is also `null` when it is not an object; `body` keeps the original.
+- To answer in the same thread, call `microsoft_teams_bot.reply_to_message` with `serviceUrl`, `conversationId` set to `conversation.id` and `activityId`.
+- Cards:
+  - `send_message`, `reply_to_message` and `update_message` take `attachments`, cards such as `{ "contentType": "application/vnd.microsoft.card.adaptive", "content": <card JSON> }`, and `attachmentLayout` (`list` or `carousel`).
+  - Teams splits a message with both text and cards into separate messages and returns an ID for only one, so put any text inside a card that will be updated.
+  - A click on `Action.Execute` arrives as an `invoke` activity named `adaptiveCard/action`, and the host answers it with an invoke response. A click on `Action.Submit` arrives as a `message` activity whose `value` holds the card data. `Action.OpenUrl` opens the link and sends the bot nothing.
+  - `update_message` replaces the whole message, so a card with buttons can be swapped for one without, using the delivered `conversation.id` and the card's activity ID.
+- `microsoft_teams_bot.list_team_channels` lists a team's channels for a channel picker. Learn the team ID from `channelData.team.id`, for example on the `conversationUpdate` Teams sends when the bot is added to a team: the Bot Connector cannot list the teams a bot is in.
+
+The Trigger runner reaches the provider through the connection's proxy, which targets the connection's default service URL. Source operations make no Bot Connector call.
 
 Stateful `reconcile`, `receive`, and `resource` operations require a persistent runtime token. Bootstrap environment tokens, JWT verification and unauthenticated development mode can use policy-permitted `options` / `read`; they do not provide a durable subscription owner. Triggers currently require native local connections. SaaS and Marketplace connections return `trigger_source_not_supported` without attempting a local fallback.
 

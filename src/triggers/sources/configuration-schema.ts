@@ -28,9 +28,9 @@ const slackInput = z.strictObject({
   workspaceId: z.string().regex(/^T[A-Z0-9]+$/),
   signingSecret: secret,
   eventTypes: z
-    .array(z.enum(["app_mention", "message.im"]))
+    .array(z.enum(["app_mention", "message.im", "block_actions", "view_submission", "view_closed"]))
     .min(1)
-    .max(2)
+    .max(5)
     .refine((values) => new Set(values).size === values.length),
 });
 const createSchema = z.union([
@@ -98,6 +98,22 @@ const createSchema = z.union([
       .refine((values) => new Set(values).size === values.length),
   }),
   z.strictObject({
+    kind: z.literal("microsoft_teams"),
+    version: z.literal(1),
+    name,
+    connectionId: id,
+    teamId: id.nullable(),
+    eventTypes: z
+      .array(z.enum(["message", "conversationUpdate", "messageReaction", "invoke"]))
+      .min(1)
+      .max(4)
+      .refine((values) => new Set(values).size === values.length),
+    tenantId: z
+      .string()
+      .regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i)
+      .optional(),
+  }),
+  z.strictObject({
     kind: z.literal("slack"),
     version: z.literal(1),
     name,
@@ -122,7 +138,6 @@ export const updateEventSourceSchema: z.ZodType<UpdateEventSource> = z.strictObj
   encryptKey: secret.optional(),
 });
 
-export const createEventSourceSchema: z.ZodType<CreateEventSource> = createSchema;
 export function sourceCreateSchema(kind: string): z.ZodType<CreateEventSource> {
   return createSchema.options.find((schema) => schema.shape.kind.safeParse(kind).success)!;
 }

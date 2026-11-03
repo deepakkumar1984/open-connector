@@ -8,7 +8,12 @@ import {
   idempotencyKeyMaxBytes,
   idempotencyRetentionHours,
 } from "../actions/action-idempotency.ts";
-import { oauthConnectionInput, apiKeyConnectionInput, customConnectionInput } from "./connection-input.ts";
+import {
+  oauthConnectionInput,
+  apiKeyConnectionInput,
+  customConnectionInput,
+  consoleOAuthConnectionInput,
+} from "./connection-input.ts";
 import { policyRequestMaxBytes, policyRuleListMaxItems, policyRuleMaxBytes } from "./policy-input.ts";
 
 /**
@@ -42,6 +47,9 @@ const errorPayloadSchema = jsonSchema.object(
   {
     code: jsonSchema.string({ description: "Stable machine-readable error code." }),
     message: jsonSchema.string({ description: "Human-readable error message." }),
+    reason: jsonSchema.optional(
+      jsonSchema.string({ description: "SaaS- or provider-specific failure reason, when one is available." }),
+    ),
     details: {},
   },
   {
@@ -173,6 +181,21 @@ const namedConnectionParameters = [
   },
 ];
 
+const catalogLocaleParameters = [
+  queryParameter(
+    "locale",
+    "Display language: en or zh-CN. Overrides Accept-Language; unsupported locales use English. Missing translations fall back per field. IDs, schemas and authentication contracts do not change.",
+  ),
+  {
+    name: "Accept-Language",
+    in: "header",
+    required: false,
+    schema: { type: "string" },
+    description:
+      "Weighted language preferences used only when locale is absent. The selected language is returned in Content-Language.",
+  },
+];
+
 const namedConnectionProperties = {
   connectionName: jsonSchema.string({ description: namedConnectionDescription }),
   alias: jsonSchema.string({ description: namedConnectionDescription }),
@@ -279,13 +302,23 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
         },
       },
     },
-    "/api/providers": getOperation("Catalog", "List provider catalog entries.", {
-      type: "array",
-      items: { $ref: "#/components/schemas/ProviderDefinition" },
-    }),
-    "/api/providers/{service}": getOperation("Catalog", "Get one provider catalog entry.", {
-      $ref: "#/components/schemas/ProviderDefinition",
-    }),
+    "/api/providers": getOperation(
+      "Catalog",
+      "List provider catalog entries.",
+      {
+        type: "array",
+        items: { $ref: "#/components/schemas/ProviderDefinition" },
+      },
+      catalogLocaleParameters,
+    ),
+    "/api/providers/{service}": getOperation(
+      "Catalog",
+      "Get one provider catalog entry.",
+      {
+        $ref: "#/components/schemas/ProviderDefinition",
+      },
+      [...catalogLocaleParameters, { name: "service", in: "path", required: true, schema: { type: "string" } }],
+    ),
     "/api/actions": getOperation("Catalog", "List all catalog actions.", {
       type: "array",
       items: { $ref: "#/components/schemas/ActionDefinition" },
@@ -295,8 +328,10 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
       items: { $ref: "#/components/schemas/ActionSearchResult" },
     }),
     "/v1/providers": runtimeGetOperation("Catalog", "List public provider catalog entries.", {
-      description: "Closest HTTP analog of MCP list_apps. Categories are objects; MCP list_apps returns strings.",
+      description:
+        "Closest HTTP analog of MCP list_apps. Category IDs remain stable; displayName is localized. MCP list_apps returns category strings.",
       parameters: [
+        ...catalogLocaleParameters,
         queryParameter(
           "q",
           "Optional case-insensitive filter over service, display name, scenario, category, or auth type.",
@@ -1054,7 +1089,15 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
             description: "Local transit file upload response.",
           },
         ),
-        ProviderDefinition: jsonSchema.unknownObject("Public provider catalog definition."),
+        ProviderDefinition: jsonSchema.looseObject(
+          "Public provider catalog definition. Localized responses preserve category IDs and supply their display names separately.",
+          {
+            categoryDisplayNames: jsonSchema.record(
+              "Localized display names keyed by unchanged category ID.",
+              jsonSchema.string(),
+            ),
+          },
+        ),
         RunLog: jsonSchema.object(
           {
             id: jsonSchema.string({ description: "Run identifier." }),
@@ -1752,11 +1795,17 @@ function createOAuthConfigPath(): Record<string, unknown> {
   };
 }
 
-function getOperation(tag: string, summary: string, schema: JsonSchema): Record<string, unknown> {
+function getOperation(
+  tag: string,
+  summary: string,
+  schema: JsonSchema,
+  parameters?: unknown[],
+): Record<string, unknown> {
   return {
     get: {
       tags: [tag],
       summary,
+      parameters,
       responses: {
         200: jsonResponse(schema),
         404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
@@ -1928,13 +1977,16 @@ function connectionManagementPaths(): Record<string, unknown> {
     providerAccountId: jsonSchema.string("The provider account identifier."),
     comment: jsonSchema.nullableString("An optional administrator note."),
   });
-  const start = jsonSchema.object("An OAuth authorization attempt. Poll connectionRequestId to obtain its result.", {
-    authorizationUrl: jsonSchema.string(),
-    stateHandle: jsonSchema.string(),
-    connectionRequestId: jsonSchema.string(),
-    status: jsonSchema.literal("initiated"),
-    expiresAt: jsonSchema.string(),
-  });
+  const start = jsonSchema.requiredObject(
+    "An OAuth authorization attempt. Poll connectionRequestId to obtain its result.",
+    {
+      authorizationUrl: jsonSchema.string(),
+      stateHandle: jsonSchema.string(),
+      connectionRequestId: jsonSchema.string(),
+      status: jsonSchema.literal("initiated"),
+      expiresAt: jsonSchema.string(),
+    },
+  );
   const request = jsonSchema.object(
     "One authorization attempt; results remain available until expiresAt plus 24 hours.",
     {
@@ -2026,7 +2078,7 @@ function connectionManagementPaths(): Record<string, unknown> {
       "Describe the inputs a provider needs before it can be connected.",
       {
         data: setup,
-        parameters: [parameter("service")],
+        parameters: [parameter("service"), ...catalogLocaleParameters],
         errorStatuses: [401, 403, 404],
         description:
           "Requires administrator authentication. Lists credential fields, OAuth client inputs, scopes, registration help, the callback URL to register and the OAuth client inputs still missing. Never includes saved values.",
@@ -2094,5 +2146,33 @@ function connectionManagementPaths(): Record<string, unknown> {
       };
     }
   }
+  paths["/api/oauth/connection-requests"] = {
+    post: {
+      tags: ["Connections"],
+      summary: "Start an OAuth connection request from the console.",
+      description:
+        "Console alias for starting an OAuth connection: returns the provider authorization URL and a connection request id to poll. An appId reconnects an existing connection and must match service and connectionName. Requires administrator credentials.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: z.toJSONSchema(consoleOAuthConnectionInput),
+          },
+        },
+      },
+      responses: {
+        200: jsonResponse(start),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        401: jsonResponse(runtimeFailureSchema()),
+        403: jsonResponse(runtimeFailureSchema()),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        409: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        429: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        502: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        503: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        504: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
   return paths;
 }

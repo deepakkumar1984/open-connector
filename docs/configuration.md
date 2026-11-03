@@ -181,7 +181,7 @@ state). Superseded requests (a newer authorization replaced them) and derived st
 
 The Node runtime stores transit files under `data/files` by default. Set
 `OOMOL_CONNECT_TRANSIT_FILE_BACKEND=s3` to share transit files across multiple Node or Docker
-instances through AWS S3 or an S3-compatible service such as MinIO, Cloudflare R2, or Alibaba Cloud
+instances through AWS S3 or an S3-compatible service such as MinIO, Cloudflare R2, Neon, or Alibaba Cloud
 OSS:
 
 ```bash
@@ -203,6 +203,13 @@ For Cloudflare R2, use the account S3 endpoint and set the region to `auto`. For
 use its S3-compatible endpoint (`https://s3.oss-<region>.aliyuncs.com`), set the matching region, and
 leave path-style access disabled. MinIO commonly uses its server URL as the endpoint with
 `OOMOL_CONNECT_S3_FORCE_PATH_STYLE=true`.
+
+For Neon Object Storage, use the branch S3 endpoint
+(`https://<branch-id>.storage.<cell>.<region>.aws.neon.tech`), set the region the branch reports,
+and set `OOMOL_CONNECT_S3_FORCE_PATH_STYLE=true` because Neon only accepts path-style requests. The
+`neon_object_storage.get_branch_storage` action returns the endpoint and region for a branch. Create the bucket with
+`neon_object_storage.create_bucket` or the Neon Console, and use a branch credential's access key ID and secret
+access key for the two credential variables.
 
 Uploads and downloads continue to use `/api/files`; the bucket does not need to be public. All
 instances must use the same bucket and S3 settings. The runtime rejects expired files when they are
@@ -232,7 +239,7 @@ private targets are rejected during connection setup.
 Some self-hosted services are only reachable over a LAN or an overlay network
 such as Tailscale or NetBird. To allow those connections, set
 `OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK=true`. When enabled, connections for the
-self-hosted providers that opt in (**Dokploy**, **n8n**, **GitLab**,
+self-hosted providers that opt in (**Apache Doris**, **Dokploy**, **n8n**, **GitLab**,
 **Gitea**, **Home Assistant**, **IMAP Mailbox**, and others) may target:
 
 - RFC 1918 ranges: `10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`
@@ -243,14 +250,80 @@ self-hosted providers that opt in (**Dokploy**, **n8n**, **GitLab**,
 The following targets stay blocked even when the flag is enabled:
 
 - Loopback and localhost (`127.0.0.0/8`, `localhost`, `.localhost`)
-- Link-local and cloud metadata (`169.254.0.0/16`, `100.100.100.200/32`, and
-  metadata hostnames such as `metadata.google.internal`)
-- Reserved, multicast, and broadcast ranges, and all IPv6 targets
+- Link-local and cloud metadata (`169.254.0.0/16`, `100.100.100.200/32`, the Azure
+  platform endpoint `168.63.129.16/32`, the IPv6 metadata endpoints `fd00:ec2::254`,
+  `fd20:ce::254`, and `fd00:c1::a9fe:a9fe`, and metadata hostnames such as
+  `metadata.google.internal`)
+- Reserved, multicast, and broadcast ranges
+- IPv6 address literals in URLs; a hostname that resolves to IPv6 addresses goes through
+  the same checks as one that resolves to IPv4
 
 > **Enable this only on a single-tenant, self-hosted runtime that you operate.**
 > On a shared or multi-tenant deployment, turning it on lets any connection
 > owner reach the operator's internal network from the runtime's egress
 > position, so leave it at the `false` default there.
+
+### Apache Doris
+
+The `doris` provider uses the FE HTTP statement API, with Apache Doris **2.1** as
+the minimum supported version. It provides `execute_query`, `list_databases`,
+`list_tables`, and `get_table_schema`. Configure a `custom_credential` connection
+with `baseUrl` (the FE HTTP endpoint, usually port 8030), `username`, `password`,
+and optionally `defaultDatabase`. Use HTTPS for publicly exposed endpoints.
+
+Use a dedicated account with only `SELECT_PRIV` on the databases it needs:
+
+```sql
+GRANT SELECT_PRIV ON your_db.* TO 'oc_reader'@'%';
+```
+
+The user must already exist. Do not grant administrator or write privileges to
+this account. On Doris versions where `enable_all_http_auth=true` adds an ADMIN
+check to the statement endpoint, a SELECT-only account cannot use this provider.
+That deployment configuration is incompatible with this integration's minimum
+privilege setup; do not elevate the connector account to work around it.
+
+Credential validation runs `SELECT 1`. Query execution uses the action's
+`database`, then `defaultDatabase`, then the built-in `information_schema`.
+Database listing and credential validation use `defaultDatabase` or
+`information_schema`. Table listing and table schema actions require either an
+action `database` or a configured `defaultDatabase`. Table names are unqualified
+identifiers and are quoted by the provider.
+
+`execute_query` accepts one `SELECT`, `WITH ... SELECT`, `SHOW`, `DESC`,
+`DESCRIBE`, or `EXPLAIN` statement, with an optional trailing semicolon. It rejects
+multiple statements and write keywords, including `INTO OUTFILE` even when used
+inside a SELECT. Quoted values and ordinary comments are recognized; SQL hints,
+executable comments and backslash escapes are not supported. Use doubled quotes
+for literal quote characters and backticks for identifiers that use reserved
+words. These checks supplement database permissions; they do not establish a
+sandbox for functions or external resources configured by the Doris operator.
+The provider does not expose an arbitrary HTTP proxy.
+
+All four actions return `columns`, positional `rows`, `rowCount`,
+`executionTimeMs`, and `truncated`. Duplicate column names are preserved. For
+database/table listings each row holds a name; schema lookup returns DESCRIBE
+rows, with `columns` identifying their attributes. A nonzero Doris `code` is an
+error, and an unexpected `exec_status` response is rejected instead of being
+reported as an empty result set.
+
+`maxRows` defaults to 1,000 and accepts 1–10,000. Requests disable Doris streaming
+with `X-Doris-Stream: false` and ask for one extra row through the HTTP body's
+`limit` field so `truncated` is accurate. Response bodies are capped at **8 MiB**
+while being read; exceeding the cap returns an error rather than a partial
+result. The shared request timeout is 30 seconds. These limits do not bound the
+database's scan or guarantee cancellation of a server-side query: use SQL
+`LIMIT`, selective filters and Doris workload controls for expensive queries.
+
+For private FE addresses, enable `OOMOL_CONNECT_ALLOW_PRIVATE_NETWORK=true` on
+the runtime. This applies to both credential validation and action execution,
+including DNS and redirect checks. Loopback and metadata addresses remain
+blocked. Cloudflare Workers cannot route to private addresses; use a Node,
+Docker or Fly deployment with network access to the FE instead.
+
+See the [Doris statement API](https://doris.apache.org/docs/3.x/admin-manual/open-api/fe-http/statement-execution-action/),
+the [HTTP request implementation](https://github.com/apache/doris/blob/branch-3.0/fe/fe-core/src/main/java/org/apache/doris/httpv2/rest/StmtExecutionAction.java),
+and the runnable [local HTTP example](../examples/local-http/doris.ts).
 
 ### Corporate VPN host exceptions
 
@@ -415,6 +488,8 @@ The embedded package includes its catalog and migrations; custom `assets` paths
 must point to those generated assets. The host must await `runtime.close()`.
 
 ## Microsoft Teams bot event verification
+
+To have Connector also normalize, filter and identify activities for deduplication, use the `microsoft_teams_bot.on_activity` Trigger with a shared event Source instead of forwarding to this route. See [Provider Triggers](runtime-api.md#provider-triggers).
 
 Connect a Microsoft Teams Bot account with its Application (client) ID, then set `OOMOL_CONNECT_EVENT_VERIFY_TOKEN` as described for Slack. Teams delivers activities to the messaging endpoint of your own ingress, which can forward them for verification. `Authorization` carries the dedicated token, so forward the activity request's own `Authorization` header value in `X-Botframework-Authorization`:
 

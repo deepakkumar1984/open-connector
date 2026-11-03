@@ -77,6 +77,17 @@ export interface CreateJiraEventSource {
   readonly eventTypes: string[];
 }
 
+export interface CreateMicrosoftTeamsEventSource {
+  readonly kind: "microsoft_teams";
+  readonly version: 1;
+  readonly name: string;
+  readonly connectionId: string;
+  readonly teamId: string | null;
+  readonly eventTypes: string[];
+  /** Microsoft Entra tenant whose activities this Source accepts; every tenant when omitted. */
+  readonly tenantId?: string;
+}
+
 export type CreateEventSource =
   | CreateFeishuEventSource
   | CreateSlackEventSource
@@ -84,7 +95,8 @@ export type CreateEventSource =
   | CreateSentryEventSource
   | CreateZoomEventSource
   | CreateFirefliesEventSource
-  | CreateJiraEventSource;
+  | CreateJiraEventSource
+  | CreateMicrosoftTeamsEventSource;
 
 export interface UpdateEventSource {
   readonly signingSecret?: string;
@@ -102,9 +114,19 @@ export interface EventSource {
   readonly sourceId: string;
   readonly revision: number;
   readonly name: string;
-  readonly provider: "feishu" | "feishu_app_bot" | "slackbot" | "intercom" | "sentry" | "zoom" | "fireflies" | "jira";
+  readonly provider:
+    | "feishu"
+    | "feishu_app_bot"
+    | "slackbot"
+    | "intercom"
+    | "sentry"
+    | "zoom"
+    | "fireflies"
+    | "jira"
+    | "microsoft_teams_bot";
   readonly appId: string;
   readonly workspaceId?: string;
+  readonly tenantId?: string | null;
   readonly installationId?: string;
   readonly organizationId?: string;
   readonly projectId?: string;
