@@ -16,9 +16,16 @@ import type { TriggerRunner } from "../triggers/trigger-runner.ts";
 import type { LocalAuthOptions } from "./api/auth.ts";
 import type { PolicySnapshotProvider } from "./api/policy-snapshot.ts";
 import type { ITransitFileService } from "./files/transit-file-store.ts";
+import type { OAuthServerSettings } from "./oauth/settings.ts";
 import type { IIdempotencyStore } from "./storage/idempotency-store.ts";
+import type {
+  IOAuthClientStore,
+  IOAuthCodeStore,
+  IOAuthTokenStore,
+  IOAuthSigningKeyStore,
+} from "./storage/oauth-as-stores.ts";
 import type { IRuntimePolicyStore } from "./storage/runtime-policy-store.ts";
-import type { RuntimeTokenService } from "./storage/runtime-token-service.ts";
+import type { RuntimeTokenService, IRuntimeTokenStore } from "./storage/runtime-token-service.ts";
 
 import { Hono } from "hono";
 import { compress } from "hono/compress";
@@ -26,6 +33,7 @@ import { ActionPolicyService } from "../core/action-policy.ts";
 import { createActionSearchIndexProvider } from "../core/action-search.ts";
 import { optionalRecord } from "../core/cast.ts";
 import { ExecutionError } from "../core/execution-error.ts";
+import { getExecutionTimings, withExecutionTimings } from "../core/execution-timing.ts";
 import { withRuntimeExecution } from "../core/runtime-execution.ts";
 import { ProviderDispatchRequestError, toProviderExecutionError } from "../providers/provider-runtime.ts";
 import { SaasError } from "../saas/saas-client.ts";
@@ -40,6 +48,7 @@ import { createEventVerificationRoutes } from "./api/event-verification-routes.t
 import { HttpRequestError, internalError, jsonError, notFound } from "./api/http-utils.ts";
 import { createMarketplaceRoutes } from "./api/marketplace-routes.ts";
 import { createMcpRoutes, loadMcpModule } from "./api/mcp-routes.ts";
+import { createOAuthClientRoutes } from "./api/oauth-client-routes.ts";
 import { createPolicyRoutes } from "./api/policy-routes.ts";
 import { createPolicySnapshotProvider } from "./api/policy-snapshot.ts";
 import { createRunLogRoutes } from "./api/run-log-routes.ts";
@@ -52,6 +61,9 @@ import { createSaasOAuthRoutes } from "./api/saas-oauth-routes.ts";
 import { createSaasProjectRoutes } from "./api/saas-project-routes.ts";
 import { createTransitFileRoutes } from "./api/transit-file-routes.ts";
 import { createTriggerRoutes } from "./api/trigger-routes.ts";
+import { CimdClient } from "./oauth/cimd-client.ts";
+import { resolveOAuthServerConfig } from "./oauth/config.ts";
+import { createOAuthRoutes } from "./oauth/routes.ts";
 import { ProxyRunner } from "./proxy/proxy-runner.ts";
 
 /**
@@ -84,6 +96,20 @@ export interface IConnectServerOptions {
   transitFiles: ITransitFileService;
   uploadTransitFile?: (request: Request) => Promise<TransitFileUpload>;
   auth?: LocalAuthOptions;
+  /** Inbound OAuth 2.1 authorization server settings; absent/`enabled: false` mounts nothing. */
+  oauth?: OAuthServerSettings;
+  /**
+   * Trust reverse-proxy forwarding headers (`x-forwarded-for`, `x-real-ip`,
+   * `cf-connecting-ip`) when keying the OAuth endpoints' rate-limit buckets.
+   * Default `false`: keys come from the socket peer address only. Enable only
+   * behind a proxy that overwrites these headers.
+   */
+  trustProxyHeaders?: boolean;
+  oauthClients: IOAuthClientStore;
+  oauthCodes: IOAuthCodeStore;
+  oauthTokens: IOAuthTokenStore;
+  oauthKeys: IOAuthSigningKeyStore;
+  runtimeTokenStore: IRuntimeTokenStore;
   /** Dedicated token for inbound provider event verification. */
   eventVerifyToken?: string;
   actionPolicy?: ActionPolicyService;
@@ -138,8 +164,26 @@ export class ConnectServer {
     const app = new Hono();
     const auth = this.options.auth ?? {};
 
-    app.use("*", async (_context, next) => {
-      await withRuntimeExecution(this.options, { operation: "runtime" }, next);
+    app.use("*", async (context, next) => {
+      const run = () => withRuntimeExecution(this.options, { operation: "runtime" }, next);
+      const logger = this.options.logger;
+      if (!logger) return run();
+      await withExecutionTimings(async () => {
+        try {
+          await run();
+        } finally {
+          logger.info(
+            {
+              method: context.req.method,
+              path: loggableRequestPath(context.req.path),
+              status: context.res.status,
+              cancelled: context.req.raw.signal.aborted,
+              timings: getExecutionTimings(),
+            },
+            "runtime request completed",
+          );
+        }
+      });
     });
 
     app.use("*", async (context, next) => {
@@ -301,6 +345,45 @@ export class ConnectServer {
       }),
     );
 
+    // Inbound OAuth 2.1 authorization server (MCP clients) + its admin client
+    // management API. The admin API is always mounted so registered clients
+    // can be inspected and revoked even while the server itself is disabled.
+    app.route(
+      "/api",
+      createOAuthClientRoutes({
+        clients: this.options.oauthClients,
+        codes: this.options.oauthCodes,
+        tokens: this.options.oauthTokens,
+        runtimeTokens: this.options.runtimeTokens,
+      }),
+    );
+    if (this.options.oauth?.enabled) {
+      const config = resolveOAuthServerConfig({
+        issuer: this.options.oauth.issuer ?? this.options.publicOrigin,
+        accessTokenTtlSeconds: this.options.oauth.accessTokenTtlSeconds,
+        refreshTokenTtlSeconds: this.options.oauth.refreshTokenTtlSeconds,
+        authorizationCodeTtlSeconds: this.options.oauth.authorizationCodeTtlSeconds,
+        allowDynamicRegistration: this.options.oauth.allowDynamicRegistration,
+        allowClientIdMetadataDocuments: this.options.oauth.allowClientIdMetadataDocuments,
+        logger: this.options.logger,
+      });
+      app.route(
+        "/",
+        createOAuthRoutes({
+          config,
+          adminToken: auth.adminToken,
+          clients: this.options.oauthClients,
+          codes: this.options.oauthCodes,
+          tokens: this.options.oauthTokens,
+          keys: this.options.oauthKeys,
+          runtimeTokens: this.options.runtimeTokens,
+          runtimeTokenStore: this.options.runtimeTokenStore,
+          trustProxyHeaders: this.options.trustProxyHeaders,
+          cimd: new CimdClient({ logger: this.options.logger }),
+        }),
+      );
+    }
+
     // Without a console the API owns every unknown path; a console host layers its fallback over these 404s.
     if (this.options.registerStaticRoutes) this.options.registerStaticRoutes(app);
     else app.notFound(notFound);
@@ -322,7 +405,7 @@ export class ConnectServer {
         this.options.logger?.warn(
           {
             method: context.req.method,
-            path: context.req.path,
+            path: loggableRequestPath(context.req.path),
             code: error.code,
             status: error.status,
             reason: error.message,
@@ -362,7 +445,7 @@ export class ConnectServer {
         {
           err: error,
           method: context.req.method,
-          path: context.req.path,
+          path: loggableRequestPath(context.req.path),
         },
         "request failed",
       );
@@ -378,4 +461,8 @@ export class ConnectServer {
 
     return app;
   }
+}
+
+function loggableRequestPath(path: string): string {
+  return path.startsWith("/api/files/") ? "/api/files/:fileId" : path;
 }

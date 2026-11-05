@@ -419,6 +419,9 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
     "/api/oauth/authorizations": createOAuthAuthorizationPath(),
     "/api/runtime-tokens": createRuntimeTokensPath(),
     "/api/runtime-tokens/{id}": createRuntimeTokenPath(),
+    "/api/oauth-clients": createOAuthClientsPath(),
+    "/api/oauth-clients/{clientId}": createOAuthClientPath(),
+    "/api/oauth-clients/{clientId}/rotate-secret": createOAuthClientRotatePath(),
     "/api/runtime-policy": createRuntimePolicyPath(),
     "/api/files": createTransitFilesPath(),
     "/api/files/{fileId}": createTransitFilePath(),
@@ -821,6 +824,12 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
                 locallyExecutable: jsonSchema.boolean(),
                 catalogOnly: jsonSchema.boolean(),
                 requiredAuthTypes: jsonSchema.array(jsonSchema.string()),
+                authTypesSource: {
+                  type: "string",
+                  enum: ["action", "provider"],
+                  description:
+                    "Whether authentication types are declared by this action or inherited from the provider.",
+                },
                 noAuthRunnable: jsonSchema.boolean(),
                 needsCredential: jsonSchema.boolean(),
               },
@@ -829,6 +838,7 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
                   "locallyExecutable",
                   "catalogOnly",
                   "requiredAuthTypes",
+                  "authTypesSource",
                   "noAuthRunnable",
                   "needsCredential",
                 ],
@@ -956,6 +966,7 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
           },
         ),
         OAuthClientConfigRequest: oauthClientConfigRequestSchema,
+        OAuthClientSummary: oauthClientSummarySchema(),
         RuntimeTokenSummary: jsonSchema.object(
           {
             id: jsonSchema.string({ description: "Runtime token identifier." }),
@@ -1322,6 +1333,152 @@ function createRuntimeTokenPath(): Record<string, unknown> {
   };
 }
 
+function oauthClientSummarySchema(): Record<string, unknown> {
+  return jsonSchema.object(
+    {
+      clientId: jsonSchema.string({ description: "Opaque client identifier." }),
+      clientName: jsonSchema.string({ description: "User-facing client name." }),
+      registrationType: jsonSchema.string({ description: "How the client was registered: manual, dcr, or cimd." }),
+      redirectUris: jsonSchema.array(jsonSchema.string(), { description: "Registered exact-match redirect URIs." }),
+      scopes: jsonSchema.array(jsonSchema.string(), { description: "Grantable scopes." }),
+      tokenEndpointAuthMethod: jsonSchema.string({ description: "Token endpoint authentication method." }),
+      hasSecret: jsonSchema.boolean({
+        description: "Whether a client secret is configured. The secret itself is never returned after creation.",
+      }),
+      metadataDocumentUrl: jsonSchema.string({ description: "CIMD document URL, for cimd clients." }),
+      createdAt: jsonSchema.string({ description: "Creation timestamp." }),
+      rotatedAt: jsonSchema.string({ description: "Last secret rotation timestamp." }),
+    },
+    {
+      required: [
+        "clientId",
+        "clientName",
+        "registrationType",
+        "redirectUris",
+        "scopes",
+        "tokenEndpointAuthMethod",
+        "hasSecret",
+        "createdAt",
+      ],
+      description: "OAuth client registered for inbound MCP authorization.",
+    },
+  );
+}
+
+function createOAuthClientsPath(): Record<string, unknown> {
+  return {
+    get: {
+      tags: ["Access"],
+      summary: "List OAuth clients registered for inbound MCP authorization.",
+      responses: {
+        200: jsonResponse({ type: "array", items: { $ref: "#/components/schemas/OAuthClientSummary" } }),
+      },
+    },
+    post: {
+      tags: ["Access"],
+      summary: "Manually register an OAuth client.",
+      description:
+        "The client secret, when the token endpoint auth method is not none, is returned once and stored only as a hash.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: jsonSchema.object(
+              {
+                clientName: jsonSchema.string(),
+                redirectUris: jsonSchema.array(jsonSchema.string()),
+                scopes: jsonSchema.array(jsonSchema.string()),
+                tokenEndpointAuthMethod: jsonSchema.string({
+                  description: "One of: none, client_secret_basic, client_secret_post.",
+                }),
+              },
+              { required: ["clientName", "redirectUris"], description: "Manual OAuth client registration request." },
+            ),
+          },
+        },
+      },
+      responses: {
+        201: jsonResponse(
+          jsonSchema.object(
+            {
+              client: { $ref: "#/components/schemas/OAuthClientSummary" },
+              clientSecret: jsonSchema.string({
+                description: "Plaintext client secret, shown once. Absent for public clients.",
+              }),
+            },
+            { required: ["client"], description: "OAuth client creation response." },
+          ),
+        ),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        413: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createOAuthClientPath(): Record<string, unknown> {
+  return {
+    put: {
+      tags: ["Access"],
+      summary: "Update an OAuth client's name, redirect URIs, or scopes.",
+      requestBody: {
+        required: true,
+        content: {
+          "application/json": {
+            schema: jsonSchema.object(
+              {
+                clientName: jsonSchema.string(),
+                redirectUris: jsonSchema.array(jsonSchema.string()),
+                scopes: jsonSchema.array(jsonSchema.string()),
+              },
+              { description: "OAuth client update request; omitted fields keep their values." },
+            ),
+          },
+        },
+      },
+      responses: {
+        200: jsonResponse({ $ref: "#/components/schemas/OAuthClientSummary" }, "The updated OAuth client."),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        413: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+    delete: {
+      tags: ["Access"],
+      summary: "Delete an OAuth client and revoke all tokens it received.",
+      responses: {
+        200: jsonResponse(
+          jsonSchema.object(
+            { id: jsonSchema.string(), deleted: jsonSchema.boolean() },
+            { required: ["id", "deleted"], description: "OAuth client deletion response." },
+          ),
+        ),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
+function createOAuthClientRotatePath(): Record<string, unknown> {
+  return {
+    post: {
+      tags: ["Access"],
+      summary: "Rotate an OAuth client secret.",
+      description: "The new secret is returned once; the previous secret stops working immediately.",
+      responses: {
+        200: jsonResponse(
+          jsonSchema.object(
+            { clientSecret: jsonSchema.string() },
+            { required: ["clientSecret"], description: "Secret rotation response." },
+          ),
+        ),
+        400: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+        404: jsonResponse({ $ref: "#/components/schemas/ErrorResponse" }),
+      },
+    },
+  };
+}
+
 function createRuntimePolicyPath(): Record<string, unknown> {
   return {
     get: {
@@ -1647,7 +1804,7 @@ function createConnectionPath(): Record<string, unknown> {
                 type: "boolean",
                 default: false,
                 description:
-                  "Also request OAuth token revocation after deleting the local credential. Related connections may lose authorization depending on the provider's revocation policy.",
+                  "Explicitly request OAuth token revocation after deleting the local credential. Omitted or false only deletes the local connection. Related connections may lose authorization depending on the provider's revocation policy.",
               },
             }),
           },
@@ -1662,7 +1819,7 @@ function createConnectionPath(): Record<string, unknown> {
                 service: jsonSchema.string(),
                 configured: { const: false, type: "boolean" },
                 revoked: jsonSchema.stringEnum(
-                  "What the disconnect did about the grant at the provider: done (its revocation endpoint accepted the token), failed (it refused or could not be reached; the credential is deleted here regardless), unsupported (no revocation endpoint declared, no OAuth token held, or a SaaS connection) or skipped (the request body did not set revoke: true, the default).",
+                  "What the disconnect did about token revocation at the provider: done (the provider accepted the revocation request), failed (it refused or could not be reached; the credential is deleted here regardless), unsupported (no supported revocation protocol, no OAuth token held, or a SaaS connection) or skipped (the request body did not set revoke: true, the default).",
                   ["done", "failed", "unsupported", "skipped"],
                 ),
               },

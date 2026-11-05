@@ -4,6 +4,7 @@ import type { D1DatabaseBinding, D1PreparedStatementBinding } from "../../cloudf
 import { beforeEach, describe, expect, it } from "vitest";
 import { AesGcmSecretCodec } from "../../secrets/secret-codec.ts";
 import { connectionRequestStoreTests } from "../connection-request-store.cases.ts";
+import { connectionStoreTests } from "../connection-store.cases.ts";
 import { RuntimeTokenService } from "../runtime-token-service.ts";
 import { saasProjectStoreTests } from "../saas-project-store.cases.ts";
 import { triggerStoreTests } from "../trigger-store.cases.ts";
@@ -23,7 +24,7 @@ describe("D1RuntimeDatabase", () => {
       secretCodec: new AesGcmSecretCodec("local-test-key"),
     });
 
-    await database.connectionStore.set("github", "default", {
+    const connection = await database.connectionStore.set("github", "default", {
       authType: "api_key",
       apiKey: "github-token",
       values: { apiKey: "github-token" },
@@ -49,6 +50,8 @@ describe("D1RuntimeDatabase", () => {
         metadata: { login: "octocat" },
       },
     });
+    await expect(database.connectionStore.getById(connection.id)).resolves.toEqual(connection);
+    await expect(database.connectionStore.getById("missing-id")).resolves.toBeUndefined();
     await expect(database.oauthClientConfigStore.get("gmail")).resolves.toMatchObject({
       clientId: "client-id",
       clientSecret: "client-secret",
@@ -61,6 +64,7 @@ describe("D1RuntimeDatabase", () => {
     await expect(database.oauthClientConfigStore.list()).resolves.toMatchObject([{ service: "gmail" }]);
 
     await database.connectionStore.delete("github", "default");
+    await expect(database.connectionStore.getById(connection.id)).resolves.toBeUndefined();
     await database.oauthClientConfigStore.delete("gmail");
     await expect(database.connectionStore.get("github", "default")).resolves.toBeUndefined();
     await expect(database.oauthClientConfigStore.get("gmail")).resolves.toBeUndefined();
@@ -187,6 +191,7 @@ describe("D1RuntimeDatabase", () => {
   it("stores runtime token hashes and supports verification and revocation", async () => {
     const database = new D1RuntimeDatabase(new SqliteD1Database(), { secretCodec: new AesGcmSecretCodec("saas-test") });
     const tokens = new RuntimeTokenService(database.runtimeTokenStore);
+    await expect(database.runtimeTokenStore.hasAny()).resolves.toBe(false);
 
     const created = await tokens.createToken("Claude Desktop", {
       allowedActions: ["github.*"],
@@ -195,6 +200,7 @@ describe("D1RuntimeDatabase", () => {
       allowedConnections: ["example:work"],
     });
     expect(created.token).toMatch(/^oct_/);
+    await expect(database.runtimeTokenStore.hasAny()).resolves.toBe(true);
     expect(created.record.tokenHash).not.toBe(created.token);
     expect(created.record.allowedConnections).toEqual(["example:work"]);
 
@@ -232,6 +238,7 @@ describe("D1RuntimeDatabase", () => {
     });
 
     await expect(tokens.revokeToken(created.record.id)).resolves.toBe(true);
+    await expect(database.runtimeTokenStore.hasAny()).resolves.toBe(false);
     await expect(tokens.listTokens()).resolves.toEqual([]);
     await expect(tokens.verifyToken(created.token)).resolves.toBe(false);
     await expect(tokens.revokeToken(created.record.id)).resolves.toBe(false);
@@ -610,6 +617,90 @@ describe("D1RuntimeDatabase", () => {
     await expect(database.marketplaceStore.getConfig()).resolves.toBeUndefined();
     await expect(database.marketplaceStore.listProviderPreferences()).resolves.toHaveLength(2);
   });
+
+  it("rotates OAuth refresh tokens atomically with their successor", async () => {
+    const database = new D1RuntimeDatabase(new SqliteD1Database(), { secretCodec: new AesGcmSecretCodec("saas-test") });
+    const now = Date.now();
+    const base = {
+      clientId: "client-1",
+      runtimeTokenId: "grant-1",
+      scope: "mcp:access offline_access",
+      issuedAt: new Date(now).toISOString(),
+      expiresAt: now + 3_600_000,
+      refreshExpiresAt: now + 86_400_000,
+    };
+    await database.oauthTokenStore.add({ ...base, tokenHash: "access-1", refreshTokenHash: "refresh-1" });
+
+    const consumed = await database.oauthTokenStore.rotateRefreshToken("refresh-1", {
+      ...base,
+      tokenHash: "access-1b",
+      refreshTokenHash: "refresh-1b",
+    });
+    expect(consumed).toMatchObject({
+      tokenHash: "access-1",
+      clientId: "client-1",
+      refreshTokenHash: "refresh-1",
+      refreshConsumedAt: expect.any(Number),
+    });
+    await expect(database.oauthTokenStore.findByAccessTokenHash("access-1b")).resolves.toMatchObject({
+      tokenHash: "access-1b",
+      refreshTokenHash: "refresh-1b",
+    });
+
+    // The consumed row stays findable by hash (with refreshConsumedAt set)
+    // so a replayed token maps back to its grant, but a second rotation
+    // fails and inserts nothing.
+    await expect(
+      database.oauthTokenStore.rotateRefreshToken("refresh-1", {
+        ...base,
+        tokenHash: "access-1c",
+        refreshTokenHash: "refresh-1c",
+      }),
+    ).resolves.toBeUndefined();
+    await expect(database.oauthTokenStore.findByAccessTokenHash("access-1c")).resolves.toBeUndefined();
+  });
+
+  it("deletes fully expired tokens, including consumed refresh rows", async () => {
+    const database = new D1RuntimeDatabase(new SqliteD1Database(), { secretCodec: new AesGcmSecretCodec("saas-test") });
+    const now = Date.now();
+    await database.oauthTokenStore.add({
+      tokenHash: "gone",
+      clientId: "client-1",
+      runtimeTokenId: "grant-1",
+      scope: "mcp:access",
+      issuedAt: new Date(now - 120_000).toISOString(),
+      expiresAt: now - 60_000,
+    });
+    await database.oauthTokenStore.add({
+      tokenHash: "kept",
+      refreshTokenHash: "kept-refresh",
+      clientId: "client-1",
+      runtimeTokenId: "grant-1",
+      scope: "mcp:access offline_access",
+      issuedAt: new Date(now - 120_000).toISOString(),
+      expiresAt: now - 60_000,
+      refreshExpiresAt: now + 60_000,
+    });
+    // A consumed refresh token is swept on the same refreshExpiresAt clock:
+    // once that passes it is cleaned up like any other row.
+    await database.oauthTokenStore.add({
+      tokenHash: "consumed",
+      refreshTokenHash: "consumed-refresh",
+      clientId: "client-1",
+      runtimeTokenId: "grant-1",
+      scope: "mcp:access offline_access",
+      issuedAt: new Date(now - 120_000).toISOString(),
+      expiresAt: now - 60_000,
+      refreshExpiresAt: now - 1_000,
+      refreshConsumedAt: now - 90_000,
+    });
+    await database.oauthTokenStore.deleteExpired(now);
+    await expect(database.oauthTokenStore.findByAccessTokenHash("gone")).resolves.toBeUndefined();
+    await expect(database.oauthTokenStore.findByAccessTokenHash("kept")).resolves.toMatchObject({
+      tokenHash: "kept",
+    });
+    await expect(database.oauthTokenStore.findByAccessTokenHash("consumed")).resolves.toBeUndefined();
+  });
 });
 
 function createRun(id: string, startedAt: string, actionId = "hackernews.get_top_stories", service = "hackernews") {
@@ -643,6 +734,7 @@ describe("D1 connection requests", () => {
     database = new D1RuntimeDatabase(new SqliteD1Database(), { secretCodec: new AesGcmSecretCodec("saas-test") });
   });
   connectionRequestStoreTests(() => database);
+  connectionStoreTests(() => database);
   triggerStoreTests(() => database);
   saasProjectStoreTests(() => database);
 });

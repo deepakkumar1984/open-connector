@@ -215,6 +215,15 @@ http://localhost:3000/mcp
 The local MCP endpoint supports stateless `POST` JSON-RPC requests with JSON responses. It does not
 keep `GET` SSE streams open.
 
+When the Node MCP OAuth 2.1 authorization server is enabled
+(`OOMOL_CONNECT_OAUTH_ENABLED=true`) **and** the auth mode accepts OAuth tokens
+(`OOMOL_CONNECT_OAUTH_AUTH_MODE=oauth` or `mixed`; the default `runtime_token` rejects
+them), `/v1/*` and `/mcp` accept OAuth 2.1 access tokens issued by the built-in
+authorization server (`mixed` keeps accepting runtime tokens alongside them). Clients can discover the
+endpoints through `/.well-known/oauth-protected-resource` and
+`/.well-known/oauth-authorization-server`; see [Configuration](configuration.md) for the
+`OOMOL_CONNECT_OAUTH_*` settings.
+
 The MCP server exposes a small discovery-oriented tool set:
 
 - `list_apps`
@@ -254,6 +263,10 @@ account identity fields and never include stored credentials. Persistent tokens 
 `list_apps` omits a provider's default connection identity when that connection's ID is not
 granted. `get_action_guide` and `execute_action` deny ungranted credential connections before lookup.
 Virtual `no_auth` connections remain available.
+
+Action input validation runs before credential resolution and provider executor loading. Schema
+errors return `invalid_input` without refreshing OAuth credentials. MCP validation errors include
+execution and audit metadata but omit the unresolved `connection` field.
 
 Preview MCP tool metadata:
 
@@ -363,6 +376,19 @@ run before remote discovery or execution. The runtime checks the selected config
 capabilities without removing actions from the global catalog. It does not load local provider
 executors or refresh local OAuth credentials for a SaaS connection, and does not fall back to
 another connection after a failure.
+
+Execution shares one validated capability snapshot per runtime for up to 30 seconds. Concurrent
+Action and proxy calls share an in-flight discovery request. Project binding and key are still read
+from storage for each execution, and key rotation or a replacement binding cannot reuse the old
+snapshot. Project health, provider-config reads and authorization setup fetch fresh discovery;
+use the administrator provider-config refresh after changing capabilities on SaaS to update the
+snapshot immediately. Otherwise capability changes can take up to 30 seconds to appear locally.
+
+Every dispatched operation still reaches the SaaS execution endpoint for its current project,
+account, configuration and permission checks. A project-key or provider/configuration rejection
+invalidates the snapshot for the next call; it never replays the rejected POST. Execution rate limits and
+transport failures retain a still-fresh snapshot. Cancelling one shared-discovery waiter ends only
+that caller's wait; when all waiters cancel, Connect aborts discovery and discards the pending entry.
 
 Action responses keep the usual action output in `data`. The local `meta.executionId` stays
 unchanged; `meta.remoteExecutionId` identifies the SaaS execution when available and is also
@@ -523,6 +549,13 @@ stored credentials local and lets the provider proxy executor apply provider-spe
 Successful responses use the standard `/v1` success envelope with `data.status`, `data.headers`, and
 `data.data`.
 
+Caller cancellation returns HTTP 400 with `errorCode: "execution_cancelled"`. An already cancelled
+request stops before credential resolution; cancellation after dispatch does not undo provider
+side effects or automatically replay the request.
+
+Cancellation during a shared OAuth refresh ends only that caller's credential wait. The refresh
+continues and persists its tokens so other callers can use the updated credential.
+
 Most proxies run under the same 30 second per-request budget as actions, covering the upstream request
 and the response body read. A provider that does not answer in time returns HTTP 500 with `errorCode`
 `provider_error` and `data.status` 504. A minority of providers ship a hand-written proxy that keeps
@@ -557,14 +590,19 @@ These endpoints power the Web Console, examples, and setup scripts:
 - `GET /api/connections`
 - `PUT /api/connections/:service`
 - `DELETE /api/connections/:service` — deletes the stored credential and, by default, leaves the grant
-  standing at the provider. With `revoke: true` in the JSON body, an OAuth connection of a provider that
-  declares a `revocationUrl` has its token posted there (RFC 7009) once the delete has gone through, best
-  effort; the answer's `revoked` says `done`, `failed` (the provider refused or could not be reached; the
-  credential is deleted all the same), `unsupported` (no `revocationUrl` declared, no OAuth token held, or a
+  standing at the provider. With `revoke: true` in the JSON body, the runtime also requests remote OAuth
+  token revocation once the local delete has completed. The attempt is best effort; the answer's
+  `revoked` says `done`, `failed` (the provider refused or could not be reached; the
+  credential is deleted all the same), `unsupported` (no supported revocation protocol, no OAuth token held, or a
   SaaS connection) or `skipped` (the body did not ask).
   Revocation may also invalidate related connections. For Google, it removes the user's granted scopes
   for the project and invalidates tokens for all OAuth clients registered under that project; it is not
   limited to the selected connection or client. See [Google's token revocation documentation](https://developers.google.com/identity/protocols/oauth2/web-server#tokenrevoke).
+  Ordinary disconnects never request remote revocation. Request `revoke: true` only when ending the
+  remote access is intended, including its effects on shared credentials and related connections.
+  Revocation is best effort: a concurrent refresh in another runtime can make it fail. The runtime
+  does not perform later automatic token cleanup. A `failed` result leaves remote revocation
+  unconfirmed; check the provider's authorization settings when remote access must be removed.
 - `GET /api/oauth/configs`
 - `PUT /api/oauth/configs/:service`
 - `DELETE /api/oauth/configs/:service`

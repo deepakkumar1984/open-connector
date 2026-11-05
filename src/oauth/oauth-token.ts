@@ -63,6 +63,13 @@ export interface OAuthAccessTokenRefreshInput {
   createError: OAuthTokenErrorFactory;
 }
 
+export interface OAuthTokenRevokeInput {
+  accessToken: string;
+  clientConfig: OAuthClientConfig;
+  fetcher: typeof fetch;
+  createError: OAuthTokenErrorFactory;
+}
+
 /** Provider-local overrides for token protocols that do not follow the standard OAuth request shape. */
 export interface ProviderOAuthRuntime {
   buildAuthorizationUrl?(input: {
@@ -72,6 +79,8 @@ export interface ProviderOAuthRuntime {
   }): string | Promise<string>;
   exchangeCode?(input: OAuthCodeExchangeInput): Promise<OAuthTokenResult>;
   refreshAccessToken?(input: OAuthAccessTokenRefreshInput): Promise<OAuthTokenResult>;
+  /** Revoke the supplied token pair only, leaving unrelated authorizations intact. */
+  revokeAccessToken?(input: OAuthTokenRevokeInput): Promise<void>;
 }
 
 export interface OAuthTokenRequestOptions {
@@ -285,7 +294,7 @@ async function requestToken(input: TokenRequest): Promise<OAuthTokenResult> {
     const bytes = await readTokenResponseBytes(response, input.createError);
     const rawPayload = decodeTokenPayload(bytes);
     const payload = unwrapTokenPayload(rawPayload, input.responseEnvelope);
-    if (!response.ok || !isEnvelopeSuccess(rawPayload, input.responseEnvelope)) {
+    if (!response.ok || optionalString(payload.error) || !isEnvelopeSuccess(rawPayload, input.responseEnvelope)) {
       const providerMessage = readTokenErrorMessage(rawPayload, payload, input.responseEnvelope);
       const bodyDescription = bytes.byteLength === 0 ? "empty body" : "unrecognized response body";
       throw input.createError(
@@ -299,7 +308,7 @@ async function requestToken(input: TokenRequest): Promise<OAuthTokenResult> {
     }
 
     const accessToken = requiredString(payload.access_token ?? payload.token, "access_token", input.createError);
-    const tokenType = optionalString(payload.token_type) ?? "Bearer";
+    const tokenType = canonicalTokenType(optionalString(payload.token_type));
     return {
       accessToken,
       tokenType,
@@ -359,6 +368,13 @@ function describeCause(error: unknown): string {
   // AbortError) is often the only thing distinguishing the failure.
   const prefix = error.name === "Error" || error.name === "" ? "" : `${error.name}: `;
   return `${prefix}${error.message}${suffix}`;
+}
+
+function canonicalTokenType(value: string | undefined): string {
+  if (value === undefined || value.toLowerCase() === "bearer") {
+    return "Bearer";
+  }
+  return value;
 }
 
 function createTokenMetadata(payload: Record<string, unknown>): Record<string, unknown> {
