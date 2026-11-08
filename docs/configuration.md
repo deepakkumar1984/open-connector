@@ -61,6 +61,14 @@ through runtime options to admit, delay or deny each upstream HTTP attempt.
 | `OOMOL_CONNECT_OAUTH_ALLOW_CIMD`            | `true`                    | Accepts CIMD (Client Id Metadata Document) `client_id` values for OAuth client registration.                                                                                                                                                                                                                                                                                                                     |
 | `OOMOL_CONNECT_OAUTH_TRUST_PROXY_HEADERS`   | `false`                   | Trusts `x-forwarded-for` (rightmost entry), `x-real-ip` and `cf-connecting-ip` when keying the OAuth endpoints' rate-limit buckets. Enable only behind a reverse proxy that overwrites these headers: with the default `false`, a TLS-terminating proxy collapses all callers into one shared bucket, and without such a proxy an enabled flag lets callers spoof their bucket by setting the header themselves. |
 
+Clients that registered through DCR or CIMD before the scope-default change keep their stored
+scopes; when such a client requests a scope outside its registered set (typically `offline_access`
+on top of `mcp:access`), the authorization endpoint rejects it with `invalid_scope`. Widen the
+affected client explicitly with `PUT /api/oauth-clients/:clientId` (or delete it and let the client
+register again). Existing records are never widened automatically: explicitly restricted clients
+store their scopes the same way, so an automatic widening would silently grant them more than they
+asked for.
+
 Example:
 
 ```bash
@@ -365,8 +373,7 @@ To restore eager loading, which keeps the complete catalog in memory:
 OOMOL_CONNECT_CATALOG_LAZY_SCHEMAS=false npm run dev
 ```
 
-Embedded hosts use `lazySchemas: false` for the same behavior. This default changed
-from eager loading for the standalone server; see the [release notes](../CHANGELOG.md).
+Embedded hosts use `lazySchemas: false` for the same behavior.
 
 Action metadata stays in memory: ids, names, descriptions, required scopes, provider permissions,
 follow-up and async lifecycle links, and execution flags. Only the two schema fields are read back
