@@ -3,6 +3,7 @@ import type { ProviderDefinition } from "../../core/types.ts";
 import { linearActions } from "./actions.ts";
 import { linearOAuthScopes } from "./scopes.ts";
 import { snapshot as triggerSnapshot0_0 } from "./trigger-on-issue-changed.definition.ts";
+import { snapshot as issueEventSnapshot } from "./trigger-on-issue-event.definition.ts";
 import { triggerPermissions } from "./trigger-permissions.ts";
 
 const service = "linear";
@@ -36,6 +37,6 @@ export const provider: ProviderDefinition = {
   ],
   homepageUrl: "https://linear.app",
   actions: linearActions,
-  triggers: [triggerSnapshot0_0],
+  triggers: [triggerSnapshot0_0, issueEventSnapshot],
   triggerPermissions,
 };

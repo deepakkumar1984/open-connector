@@ -117,7 +117,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: `${apiBaseUrl}:${defaultUserDir ?? "unknown-user-dir"}`,
         displayName: defaultUserDir ? `Formsite ${defaultUserDir}` : "Formsite API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl,
         validationEndpoint: formsiteValidationPathSuffix,
@@ -281,7 +280,7 @@ async function deleteWebhook(input: Record<string, unknown>, context: FormsiteAc
 }
 
 async function requestFormsiteJson(
-  context: Pick<FormsiteActionContext, "apiKey" | "apiBaseUrl" | "fetcher" | "signal">,
+  context: FormsiteActionContext,
   input: FormsiteRequestInput,
 ): Promise<FormsiteJsonRecord> {
   const response = await formsiteFetch(context, input);
@@ -300,10 +299,7 @@ async function requestFormsiteJson(
   }
 }
 
-async function formsiteFetch(
-  context: Pick<FormsiteActionContext, "apiKey" | "apiBaseUrl" | "fetcher" | "signal">,
-  input: FormsiteRequestInput,
-): Promise<Response> {
+async function formsiteFetch(context: FormsiteActionContext, input: FormsiteRequestInput): Promise<Response> {
   const url = buildFormsiteUrl(context.apiBaseUrl, input.path, input.query);
   const headers = new Headers({
     accept: "application/json",

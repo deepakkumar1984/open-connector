@@ -1,6 +1,5 @@
 import type { CredentialValidationResult, ProviderExecutors } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -80,9 +79,7 @@ export async function validateReplicateCredential(
     profile: {
       accountId: username ?? "replicate-api-token",
       displayName: name || username || "Replicate API Token",
-      grantedScopes: [],
     },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: replicateValidationPath,
       username,
@@ -231,7 +228,7 @@ async function cancelPrediction(input: Record<string, unknown>, context: ApiKeyP
 
 async function replicateRequest(
   options: ReplicateRequestOptions & {
-    context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+    context: ApiKeyProviderContext;
   },
 ): Promise<unknown> {
   const url = new URL(options.path, replicateApiBaseUrl);

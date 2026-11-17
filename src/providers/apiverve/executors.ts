@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalBooleanOrNull, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -211,7 +210,6 @@ export const credentialValidators: CredentialValidators = {
       profile: {
         displayName: "APIVerve API Key",
       },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/v1/advice",
         apiBaseUrl: apiverveApiBaseUrl,
@@ -223,7 +221,7 @@ export const credentialValidators: CredentialValidators = {
 async function requestApiverveData(input: {
   path: string;
   params: Record<string, ApiverveQueryValue>;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: ApivervePhase;
 }): Promise<unknown> {
   const timeoutSignal = AbortSignal.timeout(defaultProviderRequestTimeoutMs);

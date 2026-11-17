@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -135,7 +134,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: accountId ?? "callrail",
         displayName: accountName ?? "CallRail API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: callrailApiBaseUrl,
         validationEndpoint: "/v3/a.json",
@@ -147,7 +145,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function requestCallrailJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   phase: CallrailRequestPhase;
   query?: Record<string, string | undefined>;

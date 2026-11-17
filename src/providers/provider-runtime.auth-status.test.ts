@@ -15,9 +15,11 @@ import {
 } from "./clinicalkey/executors.ts";
 import { executors as deepgramExecutors } from "./deepgram/executors.ts";
 import { credentialValidators as dovetailValidators } from "./dovetail/executors.ts";
+import { executors as figmaExecutors } from "./figma/executors.ts";
 import { executors as helpdeskExecutors } from "./helpdesk/executors.ts";
 import { executors as mondayExecutors } from "./monday/executors.ts";
 import { ProviderRequestError, toProviderExecutionError } from "./provider-runtime.ts";
+import { proxy as rendiProxy } from "./rendi/executors.ts";
 import {
   credentialValidators as roxyapiValidators,
   executors as roxyapiExecutors,
@@ -98,7 +100,6 @@ const authFailureCases: AuthFailureCase[] = [
     actionId: "teable.list_spaces",
     credential: apiKeyCredential,
   },
-  { service: "zoom", executors: zoomExecutors, actionId: "zoom.list_meetings", credential: oauthCredential },
 ];
 
 interface ValidatePhaseCase {
@@ -370,5 +371,35 @@ describe("provider-local endpoint denials", () => {
     const result = toProviderExecutionError(raised, "TikHub request failed");
     expect(result).toMatchObject({ ok: false, error: { code: "invalid_input" } });
     expect(httpStatusOf(result)).toBe(400);
+  });
+});
+
+it.each([401, 403])("preserves ambiguous Zoom HTTP %s errors without requesting reauthorization", async (status) => {
+  const result = await runExpiredCredential(
+    { service: "zoom", executors: zoomExecutors, actionId: "zoom.list_meetings", credential: oauthCredential },
+    status,
+  );
+  expect(result).toMatchObject({ ok: false, error: { code: "provider_error" } });
+});
+
+it.each([401, 403])("preserves ambiguous Figma HTTP %s errors without requesting reauthorization", async (status) => {
+  const result = await runExpiredCredential(
+    { service: "figma", executors: figmaExecutors, actionId: "figma.get_current_user", credential: oauthCredential },
+    status,
+  );
+  expect(result).toMatchObject({ ok: false, error: { code: "provider_error" } });
+});
+
+it.each([
+  [401, { detail: "Invalid authorization key" }, "authorization_failed"],
+  [401, { detail: "Plan unavailable" }, "provider_error"],
+  [403, { detail: "Invalid authorization key" }, "provider_error"],
+])("Rendi proxy maps only its documented invalid-key response: %i %j", async (status, payload, code) => {
+  vi.stubGlobal("fetch", async () => Response.json(payload, { status: Number(status) }));
+  const context: ExecutionContext = { getCredential: async () => apiKeyCredential };
+
+  expect(await rendiProxy({ endpoint: "/v1/commands", method: "GET" }, context)).toMatchObject({
+    ok: false,
+    error: { code },
   });
 });

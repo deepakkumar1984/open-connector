@@ -3,7 +3,7 @@ import type { ActionDefinition } from "../../core/types.ts";
 import { jsonSchema as s } from "../../core/json-schema.ts";
 import { defineProviderAction } from "../../core/provider-definition.ts";
 
-const service = "metatraderapi" as const;
+const service = "metatraderapi";
 
 const emptyInputSchema = (description: string) => s.object(description, {});
 const sessionIdSchema = s.nonWhitespaceString("The MetaTraderAPI session identifier returned by start_session.");
@@ -234,7 +234,7 @@ const symbolOutputSchema = s.object("Detailed information about a trading symbol
   symbol: symbolInfoSchema,
 });
 
-// 安全边界：仅暴露会话管理与只读账户/行情能力，不提供开仓、平仓、改单或自动交易控制。
+// Limit actions to session management and read-only account/market data; exclude trading and automation controls.
 export const metatraderapiActions: readonly ActionDefinition[] = [
   defineProviderAction(service, {
     name: "list_sessions",

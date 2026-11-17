@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalNumber, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -178,7 +177,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: firstWorkspace ? String(firstWorkspace.id) : undefined,
         displayName: firstWorkspace?.name || "Linkly API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: linklyApiBaseUrl,
         validationEndpoint: `${linklyApiPrefix}/workspaces`,
@@ -191,7 +189,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function fetchWorkspaces(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: LinklyPhase,
 ): Promise<Array<{ id: number; name: string }>> {
   const payload = await requestLinklyJson({
@@ -204,7 +202,7 @@ async function fetchWorkspaces(
 }
 
 async function requestLinklyJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   phase: LinklyPhase;
   method?: LinklyMethod;

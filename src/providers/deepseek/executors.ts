@@ -6,6 +6,7 @@ import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
 import { defineProviderProxy } from "../provider-proxy.ts";
 import {
   ProviderRequestError,
+  withRetryAfterSeconds,
   providerUserAgent,
   runProviderRequest,
   isAbortLikeError,
@@ -65,7 +66,6 @@ export const credentialValidators: CredentialValidators = {
       profile: {
         displayName: "DeepSeek API Key",
       },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/models",
         availableModels: (payload.data ?? [])
@@ -128,7 +128,7 @@ async function assertDeepseekResponse(response: Response): Promise<void> {
   }
   const error = await readDeepseekError(response);
   if (response.status === 429) {
-    throw new ProviderRequestError(429, error.message, error);
+    throw new ProviderRequestError(429, error.message, withRetryAfterSeconds(response, error));
   }
   if (response.status === 400 || response.status === 422) {
     throw new ProviderRequestError(400, error.message, error);

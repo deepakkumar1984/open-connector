@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { ProviderRequestError } from "../provider-runtime.ts";
 import { komariActions } from "./actions.ts";
-import { komariOperations } from "./operations.ts";
 import { komariActionHandlers, normalizeKomariBaseUrl, validateKomariCredential } from "./runtime.ts";
 
 describe("normalizeKomariBaseUrl", () => {
@@ -50,7 +49,6 @@ describe("Komari RPC runtime", () => {
     ]);
     expect(validation).toEqual({
       profile: { accountId: "komari:monitor.example.com", displayName: "Komari monitor.example.com" },
-      grantedScopes: komariOperations.map((operation) => operation.rpcMethod),
       metadata: {
         baseUrl: "https://monitor.example.com/komari",
         version: "1.3.2",

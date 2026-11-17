@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { optionalNumber, optionalString, requiredRecord } from "../../core/cast.ts";
 import {
@@ -299,7 +298,6 @@ export async function validateTushareCredential(
       accountId: "tushare-token",
       displayName: "Tushare Token",
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: tushareApiBaseUrl,
       validationApiName: "daily",
@@ -346,7 +344,7 @@ async function executeMappedTableAction(options: MappedTableActionOptions): Prom
 
 async function tushareRequest(
   input: TushareRequestInput,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
 ): Promise<Record<string, unknown>> {
   const timeout = createProviderTimeout(context.signal);
   try {

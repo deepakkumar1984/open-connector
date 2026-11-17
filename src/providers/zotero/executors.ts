@@ -172,7 +172,6 @@ export const credentialValidators: CredentialValidators = {
     const username = optionalRawString(identity.username);
     return {
       profile: { accountId: String(userId), displayName: username ?? `Zotero user ${userId}` },
-      grantedScopes: [],
       metadata: { apiBaseUrl: baseUrl, apiVersion, userId, username, access: identity.access },
     };
   },
@@ -187,7 +186,7 @@ interface RequestOptions {
 async function request(
   path: string,
   options: RequestOptions,
-  context: Pick<Context, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
 ): Promise<{ response: Response; payload: unknown }> {
   const url = new URL(path, baseUrl);
   for (const [name, value] of Object.entries(options.query ?? {}))

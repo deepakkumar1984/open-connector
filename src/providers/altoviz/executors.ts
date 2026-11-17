@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -50,7 +49,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: email ?? "altoviz-api-key",
         displayName: displayName ?? email ?? "Altoviz API Key",
       },
-      grantedScopes: [],
       metadata: { apiBaseUrl: altovizApiBaseUrl },
     };
   },
@@ -127,7 +125,7 @@ async function createCustomer(input: Record<string, unknown>, context: ApiKeyPro
   return { customer: readObject(response.payload, "Altoviz customer") };
 }
 
-interface AltovizRequestContext extends Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal"> {
+interface AltovizRequestContext extends ApiKeyProviderContext {
   phase: AltovizPhase;
   init?: RequestInit;
 }

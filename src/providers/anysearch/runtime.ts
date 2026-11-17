@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import {
@@ -25,7 +24,6 @@ import {
 
 type AnySearchRequestPhase = "validate" | "execute";
 type AnySearchMcpToolName = "get_sub_domains" | "batch_search" | "extract";
-type AnySearchContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
 
 export const anySearchApiBaseUrl = "https://api.anysearch.com";
 const anySearchMcpEndpoint = anySearchApiBaseUrl + "/mcp";
@@ -88,7 +86,6 @@ export async function validateAnySearchApiKey(
       accountId: "anysearch",
       displayName: "AnySearch API Key",
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: anySearchApiBaseUrl,
       validationEndpoint: "/v1/search",
@@ -158,7 +155,7 @@ function readOptionalStringArray(value: unknown, fieldName: string): string[] | 
 
 async function requestAnySearchRest(
   body: Record<string, unknown>,
-  context: AnySearchContext,
+  context: ApiKeyProviderContext,
   phase: AnySearchRequestPhase,
 ): Promise<unknown> {
   const payload = await requestAnySearchJson(new URL("/v1/search", anySearchApiBaseUrl), body, context, phase);
@@ -171,7 +168,7 @@ async function requestAnySearchRest(
 async function requestAnySearchMcpTool(
   toolName: AnySearchMcpToolName,
   argumentsValue: Record<string, unknown>,
-  context: AnySearchContext,
+  context: ApiKeyProviderContext,
 ): Promise<unknown> {
   const payload = await requestAnySearchJson(
     anySearchMcpEndpoint,
@@ -194,7 +191,7 @@ async function requestAnySearchMcpTool(
 async function requestAnySearchJson(
   url: string | URL,
   body: Record<string, unknown>,
-  context: AnySearchContext,
+  context: ApiKeyProviderContext,
   phase: AnySearchRequestPhase,
   extraHeaders: Record<string, string> = {},
 ): Promise<unknown> {

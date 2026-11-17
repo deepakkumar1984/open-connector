@@ -80,24 +80,11 @@ export function createLocalAuthMiddleware(options: LocalAuthOptions): Middleware
   }
 
   const authenticate = async (context: Context): Promise<Response | undefined> => {
-    const scope = readAuthScope(context.req.path);
+    const scope = readAuthScope(context.req.path, context.req.method);
     if (isPublicPath(context.req.path, context.req.method)) {
       return;
     }
 
-    if (
-      isConnectionManagementPath(context.req.path) &&
-      !adminToken &&
-      (runtimeToken ||
-        options.verifyRuntimeJwt ||
-        (options.hasRuntimeTokens ? await options.hasRuntimeTokens() : options.resolveRuntimeToken !== undefined))
-    ) {
-      return writeRuntimeFailure(context, {
-        status: 403,
-        errorCode: "forbidden",
-        message: "Configure an admin token to manage connections.",
-      });
-    }
     if (adminToken && matchesConfiguredToken(context, adminToken)) adminBearerRequests.add(context.req.raw);
     if (await hasValidToken(context, options, scope)) {
       if (scope === "admin") {
@@ -106,9 +93,16 @@ export function createLocalAuthMiddleware(options: LocalAuthOptions): Middleware
       return;
     }
 
-    // Admin elevation for action runs is only available when an admin token is
-    // configured. Without that, a missing admin token must not open POST
-    // /v1/actions/* while runtime tokens/JWT are otherwise enforcing auth.
+    if (scope === "admin" && !adminToken) {
+      return writeRuntimeFailure(context, {
+        status: 403,
+        errorCode: "forbidden",
+        message: "Configure an admin token to access management endpoints.",
+      });
+    }
+
+    // Keep administrator access to action runs and transit cleanup. A missing
+    // administrator credential must not bypass runtime authentication.
     if (
       canUseAdminAuth(context.req.path, context.req.method) &&
       normalizeToken(options.adminToken) &&
@@ -134,7 +128,7 @@ export function createLocalAuthMiddleware(options: LocalAuthOptions): Middleware
     }
     // RFC 9728 discovery: MCP clients learn the authorization server's
     // metadata location from this challenge on the resource's 401.
-    if (options.oauthChallenge && readAuthScope(context.req.path) === "runtime") {
+    if (options.oauthChallenge && scope === "runtime") {
       context.header("WWW-Authenticate", options.oauthChallenge);
     }
     return jsonError(context, 401, "unauthorized", "A valid local bearer token is required.");
@@ -181,7 +175,7 @@ function isPublicPath(path: string, method: string): boolean {
 export async function readLocalAuthSession(context: Context, options: LocalAuthOptions): Promise<LocalAuthSession> {
   const adminToken = normalizeToken(options.adminToken);
   if (!adminToken) {
-    return { adminAuthConfigured: false, authenticated: true };
+    return { adminAuthConfigured: false, authenticated: !(await requiresRuntimeAuthentication(options)) };
   }
 
   const authenticated = await hasRequestToken(context, adminToken);
@@ -212,30 +206,27 @@ async function installAdminCookieForBearer(context: Context, options: LocalAuthO
 }
 
 async function hasValidToken(context: Context, options: LocalAuthOptions, scope: AuthScope): Promise<boolean> {
+  // File deletion used to require administrator access. Do not turn an
+  // administrator-only installation into anonymous deletion by inheriting the
+  // runtime scope's optional-auth fallback.
+  const protectedTransitDelete =
+    isTransitFileDelete(context.req.path, context.req.method) && normalizeToken(options.adminToken);
   // The authorization server's own endpoints authenticate their callers
   // (admin consent, client credentials); the middleware must let them through.
   if (scope === "oauth") {
     return true;
   }
   if (scope === "runtime" && options.authMode === "none") {
-    return true;
+    return !protectedTransitDelete;
   }
   // In `oauth` mode a configured static runtime token is not accepted: OAuth-only
   // means OAuth-only, so skip straight to runtime-token resolution below.
   const skipStaticRuntimeToken = scope === "runtime" && options.authMode === "oauth";
   const token = skipStaticRuntimeToken ? undefined : tokenForScope(options, scope);
   if (!token) {
-    if (scope === "admin") {
-      return true;
-    }
-    const authMode = options.authMode ?? "runtime_token";
-    const acceptsOAuth = (authMode === "oauth" || authMode === "mixed") && options.resolveOAuthToken !== undefined;
-    if (authMode !== "oauth" && !acceptsOAuth && !options.requireRuntimeAuth && !options.verifyRuntimeJwt) {
-      const hasRuntimeTokens = options.hasRuntimeTokens
-        ? await options.hasRuntimeTokens()
-        : options.resolveRuntimeToken !== undefined;
-      if (!hasRuntimeTokens) return true;
-    }
+    const required = await requiresRuntimeAuthentication(options);
+    if (scope === "admin") return !required;
+    if (!required && !protectedTransitDelete) return true;
     return hasValidRuntimeToken(context, options);
   }
 
@@ -244,6 +235,20 @@ async function hasValidToken(context: Context, options: LocalAuthOptions, scope:
   }
 
   return scope === "runtime" ? await hasValidRuntimeToken(context, options) : false;
+}
+
+async function requiresRuntimeAuthentication(options: LocalAuthOptions): Promise<boolean> {
+  if (options.authMode === "none") return false;
+  if (
+    normalizeToken(options.runtimeToken) ||
+    options.requireRuntimeAuth ||
+    options.verifyRuntimeJwt ||
+    options.authMode === "oauth" ||
+    (options.authMode === "mixed" && options.resolveOAuthToken)
+  ) {
+    return true;
+  }
+  return options.hasRuntimeTokens ? await options.hasRuntimeTokens() : options.resolveRuntimeToken !== undefined;
 }
 
 async function hasRequestToken(context: Context, token: string): Promise<boolean> {
@@ -306,9 +311,14 @@ function normalizeToken(token: string | undefined): string | undefined {
   return value ? value : undefined;
 }
 
-function readAuthScope(path: string): AuthScope {
+function isTransitFileDelete(path: string, method: string): boolean {
+  return method === "DELETE" && /^\/api\/files\/[^/]+$/.test(path);
+}
+
+function readAuthScope(path: string, method: string): AuthScope {
   if (isConnectionManagementPath(path)) return "admin";
   if (isOAuthServerPath(path)) return "oauth";
+  if (isTransitFileDelete(path, method)) return "runtime";
   return path === "/mcp" || path.startsWith("/mcp/") || path === "/v1" || path.startsWith("/v1/") ? "runtime" : "admin";
 }
 
@@ -328,7 +338,7 @@ function isOAuthServerPath(path: string): boolean {
 }
 
 function canUseAdminAuth(path: string, method: string): boolean {
-  return method === "POST" && /^\/v1\/actions\/[^/]+$/.test(path);
+  return isTransitFileDelete(path, method) || (method === "POST" && /^\/v1\/actions\/[^/]+$/.test(path));
 }
 
 function tokenForScope(options: LocalAuthOptions, scope: AuthScope): string | undefined {
@@ -386,6 +396,8 @@ function readBearerCredential(context: Context): string {
 
 function isConnectionManagementPath(path: string): boolean {
   return (
+    path === "/api/custom-mcp" ||
+    path.startsWith("/api/custom-mcp/") ||
     /^\/v1\/providers\/[^/]+\/setup$/.test(path) ||
     path === "/v1/connections" ||
     path.startsWith("/v1/connections/") ||

@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import {
@@ -22,8 +21,7 @@ import {
 
 type ScraperapiPhase = "validate" | "execute";
 type ScraperapiQueryValue = string | number | boolean | undefined;
-type ScraperapiActionContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
-type ScraperapiActionHandler = ProviderRuntimeHandler<ScraperapiActionContext>;
+type ScraperapiActionHandler = ProviderRuntimeHandler<ApiKeyProviderContext>;
 
 export const scraperapiApiBaseUrl = "https://api.scraperapi.com/";
 
@@ -88,7 +86,6 @@ export async function validateScraperapiCredential(
       accountId: "scraperapi",
       displayName: "ScraperAPI API Key",
     },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: "/account",
       apiBaseUrl: "https://api.scraperapi.com",
@@ -126,7 +123,7 @@ async function requestScraperapiAccount(
 async function requestScraperapiRaw(
   query: Record<string, ScraperapiQueryValue>,
   init: RequestInit,
-  context: ScraperapiActionContext,
+  context: ApiKeyProviderContext,
   phase: ScraperapiPhase,
 ): Promise<Response> {
   return requestScraperapiUrl(scraperapiApiBaseUrl, query, init, context, phase);
@@ -136,7 +133,7 @@ async function requestScraperapiUrl(
   url: string,
   query: Record<string, ScraperapiQueryValue>,
   init: RequestInit,
-  context: ScraperapiActionContext,
+  context: ApiKeyProviderContext,
   phase: ScraperapiPhase,
 ): Promise<Response> {
   const timeout = createProviderTimeout(context.signal, scraperapiRequestTimeoutMs);

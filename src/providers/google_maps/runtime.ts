@@ -130,7 +130,6 @@ export async function validateCredential(
   );
   return {
     profile: { accountId: "google_maps", displayName: "Google Maps API Key" },
-    grantedScopes: [],
     metadata: { validationEndpoint: "/v1/places:searchText" },
   };
 }
@@ -138,7 +137,7 @@ export async function validateCredential(
 async function requestJson(
   url: URL,
   options: RequestOptions,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: Phase,
   label: string,
 ): Promise<unknown> {

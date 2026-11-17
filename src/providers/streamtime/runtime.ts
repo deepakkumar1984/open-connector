@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { compactObject, optionalString, positiveInteger } from "../../core/cast.ts";
@@ -16,8 +15,7 @@ const streamtimeValidationPath = "/organisation";
 
 type StreamtimeMode = "validation" | "execution";
 type StreamtimeMethod = "GET" | "POST" | "PUT";
-type StreamtimeActionContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
-type StreamtimeActionHandler = (input: Record<string, unknown>, context: StreamtimeActionContext) => Promise<unknown>;
+type StreamtimeActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 export const streamtimeActionHandlers: ProviderActionHandlers<"streamtime", StreamtimeActionHandler> = {
   get_organisation(_input, context) {
@@ -110,7 +108,6 @@ export async function validateStreamtimeCredential(
       accountId: organisationDomain ?? "api_key",
       displayName: organisationName ?? "Streamtime API Token",
     },
-    grantedScopes: [],
     metadata: compactObject({
       apiBaseUrl: streamtimeApiBaseUrl,
       validationEndpoint: streamtimeValidationPath,
@@ -123,7 +120,7 @@ export async function validateStreamtimeCredential(
 async function getWrappedObject(
   path: string,
   outputKey: string,
-  context: StreamtimeActionContext,
+  context: ApiKeyProviderContext,
 ): Promise<Record<string, unknown>> {
   return {
     [outputKey]: readRequiredObject(await streamtimeRequest("GET", path, undefined, context, "execution"), outputKey),
@@ -134,7 +131,7 @@ async function getWrappedArray(
   path: string,
   outputKey: string,
   fieldName: string,
-  context: StreamtimeActionContext,
+  context: ApiKeyProviderContext,
 ): Promise<Record<string, unknown>> {
   return {
     [outputKey]: readRequiredArray(await streamtimeRequest("GET", path, undefined, context, "execution"), fieldName),
@@ -146,7 +143,7 @@ async function writeWrappedObject(
   path: string,
   body: Record<string, unknown>,
   outputKey: string,
-  context: StreamtimeActionContext,
+  context: ApiKeyProviderContext,
 ): Promise<Record<string, unknown>> {
   return {
     [outputKey]: readRequiredObject(await streamtimeRequest(method, path, body, context, "execution"), outputKey),
@@ -157,7 +154,7 @@ async function streamtimeRequest(
   method: StreamtimeMethod,
   path: string,
   body: Record<string, unknown> | undefined,
-  context: StreamtimeActionContext,
+  context: ApiKeyProviderContext,
   mode: StreamtimeMode,
 ): Promise<unknown> {
   const url = new URL(path.startsWith("/") ? path.slice(1) : path, `${streamtimeApiBaseUrl}/`);

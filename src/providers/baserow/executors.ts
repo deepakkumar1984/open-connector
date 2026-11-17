@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -193,7 +192,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: firstTableId !== undefined ? `baserow:table:${firstTableId}` : undefined,
         displayName: optionalString(firstTable?.name) ?? "Baserow Database Token",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: baserowApiBaseUrl,
         validationEndpoint: baserowValidationPath,
@@ -207,7 +205,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function requestBaserowJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   phase: BaserowPhase;
   method?: "GET" | "POST" | "PATCH" | "DELETE";

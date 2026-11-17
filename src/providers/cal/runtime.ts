@@ -1,6 +1,5 @@
 import type { CredentialValidationResult, ResolvedCredential } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { OAuthProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, OAuthProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import {
@@ -11,8 +10,8 @@ import {
   optionalString,
   recordOrEmpty,
 } from "../../core/cast.ts";
+import { readOAuthScopes } from "../../oauth/oauth-scopes.ts";
 import { ProviderRequestError } from "../provider-runtime.ts";
-import { calProviderScopes } from "./actions.ts";
 
 export const calApiBaseUrl = "https://api.cal.com";
 const calMeApiVersion = "2024-08-13";
@@ -45,7 +44,6 @@ export function resolveCalProxyApiVersion(pathname: string): string | undefined 
   }
 }
 
-type CalActionContext = Pick<OAuthProviderContext, "accessToken" | "tokenType" | "fetcher" | "signal">;
 type CalActionHandler = ProviderRuntimeHandler<OAuthProviderContext>;
 
 interface CalEnvelope<T> {
@@ -222,7 +220,6 @@ export async function validateCalCredential(
     apiVersion: calMeApiVersion,
   });
   const id = optionalInteger(profile.id);
-  const providerScopes = parseProviderScopes(optionalString(credential.metadata.scope), calProviderScopes);
 
   return {
     profile: {
@@ -233,7 +230,7 @@ export async function validateCalCredential(
         optionalString(profile.email) ??
         (id !== undefined ? String(id) : "Cal.com Account"),
     },
-    grantedScopes: providerScopes,
+    grantedScopes: readOAuthScopes(credential.metadata.scope),
     metadata: compactObject({
       ...credential.metadata,
       id,
@@ -246,7 +243,7 @@ export async function validateCalCredential(
   };
 }
 
-async function calGetMyProfile(context: CalActionContext): Promise<Record<string, unknown>> {
+async function calGetMyProfile(context: OAuthProviderContext): Promise<Record<string, unknown>> {
   const profile = await calRequest<Record<string, unknown>>({
     context,
     path: "/v2/me",
@@ -258,7 +255,7 @@ async function calGetMyProfile(context: CalActionContext): Promise<Record<string
 
 async function calUpdateMyProfile(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const profile = await calRequest<Record<string, unknown>>({
     context,
@@ -273,7 +270,7 @@ async function calUpdateMyProfile(
 
 async function calListEventTypes(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -295,7 +292,7 @@ async function calListEventTypes(
 
 async function calGetEventType(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -312,7 +309,7 @@ async function calGetEventType(
 
 async function calCreateEventType(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -327,7 +324,7 @@ async function calCreateEventType(
 
 async function calUpdateEventType(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const { eventTypeId, ...body } = input;
   const data = await calRequest<unknown>({
@@ -343,7 +340,7 @@ async function calUpdateEventType(
 
 async function calDeleteEventType(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -357,7 +354,7 @@ async function calDeleteEventType(
 
 async function calGetEventTypePrivateLinks(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -370,7 +367,7 @@ async function calGetEventTypePrivateLinks(
 
 async function calGetAvailableSlots(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   if (!input.eventTypeId && !input.eventTypeSlug && !input.usernames) {
     throw new ProviderRequestError(400, "eventTypeId, eventTypeSlug, or usernames is required");
@@ -398,7 +395,7 @@ async function calGetAvailableSlots(
   return { slots: recordOrEmpty(data) };
 }
 
-async function calRetrieveCalendarList(context: CalActionContext): Promise<Record<string, unknown>> {
+async function calRetrieveCalendarList(context: OAuthProviderContext): Promise<Record<string, unknown>> {
   const data = await calRequest<{
     connectedCalendars?: Record<string, unknown>[];
     destinationCalendar?: Record<string, unknown> | null;
@@ -416,7 +413,7 @@ async function calRetrieveCalendarList(context: CalActionContext): Promise<Recor
 
 async function calRetrieveCalendarBusyTimes(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const url = new URL(`${calApiBaseUrl}/v2/calendars/busy-times`);
   const baseQuery = compactObject({
@@ -457,7 +454,7 @@ async function calRetrieveCalendarBusyTimes(
 
 async function calUpdateDestinationCalendarIntegration(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -474,7 +471,7 @@ async function calUpdateDestinationCalendarIntegration(
 
 async function calListBookings(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const payload = await calRequestEnvelope<unknown>({
     context,
@@ -504,7 +501,7 @@ async function calListBookings(
 
 async function calFetchAllBookings(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const statusInput = Array.isArray(input.status)
     ? input.status
@@ -543,7 +540,7 @@ async function calFetchAllBookings(
 
 async function calGetBooking(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -558,7 +555,7 @@ async function calGetBooking(
 
 async function calCreateBooking(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   if (!input.eventTypeId && !input.eventTypeSlug) {
     throw new ProviderRequestError(400, "eventTypeId or eventTypeSlug is required");
@@ -581,7 +578,7 @@ async function calCreateBooking(
 
 async function calListAttendees(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -594,7 +591,7 @@ async function calListAttendees(
 
 async function calAddAttendee(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const { bookingUid, ...body } = input;
   const data = await calRequest<unknown>({
@@ -610,7 +607,7 @@ async function calAddAttendee(
 
 async function calListBookingReferences(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -626,7 +623,7 @@ async function calListBookingReferences(
 
 async function calConfirmBooking(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -640,7 +637,7 @@ async function calConfirmBooking(
 
 async function calDeclineBooking(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -655,7 +652,7 @@ async function calDeclineBooking(
 
 async function calMarkBookingAbsent(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -673,7 +670,7 @@ async function calMarkBookingAbsent(
 
 async function calReassignBooking(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<Record<string, unknown>>({
     context,
@@ -690,7 +687,7 @@ async function calReassignBooking(
 
 async function calCancelBooking(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -710,7 +707,7 @@ async function calCancelBooking(
 
 async function calRescheduleBooking(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -731,7 +728,7 @@ async function calRescheduleBooking(
 
 async function calListSchedules(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -746,7 +743,7 @@ async function calListSchedules(
 
 async function calGetSchedule(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -759,7 +756,7 @@ async function calGetSchedule(
 
 async function calCreateSchedule(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
@@ -774,7 +771,7 @@ async function calCreateSchedule(
 
 async function calUpdateSchedule(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   const { scheduleId, ...body } = input;
   const data = await calRequest<unknown>({
@@ -790,7 +787,7 @@ async function calUpdateSchedule(
 
 async function calDeleteSchedule(
   input: Record<string, unknown>,
-  context: CalActionContext,
+  context: OAuthProviderContext,
 ): Promise<Record<string, unknown>> {
   await calRequest<Record<string, unknown>>({
     context,
@@ -802,7 +799,7 @@ async function calDeleteSchedule(
   return { success: true };
 }
 
-async function calGetDefaultSchedule(context: CalActionContext): Promise<Record<string, unknown>> {
+async function calGetDefaultSchedule(context: OAuthProviderContext): Promise<Record<string, unknown>> {
   const data = await calRequest<unknown>({
     context,
     path: "/v2/schedules/default",
@@ -813,7 +810,7 @@ async function calGetDefaultSchedule(context: CalActionContext): Promise<Record<
 }
 
 interface CalRequestInput {
-  context: CalActionContext;
+  context: OAuthProviderContext;
   path: string;
   method?: string;
   apiVersion?: string;
@@ -903,7 +900,11 @@ async function extractCalErrorMessage(response: Response): Promise<string> {
   return text;
 }
 
-function buildCalHeaders(context: CalActionContext, apiVersion?: string, hasJsonBody = false): Record<string, string> {
+function buildCalHeaders(
+  context: OAuthProviderContext,
+  apiVersion?: string,
+  hasJsonBody = false,
+): Record<string, string> {
   const headers: Record<string, string> = {
     authorization: `${context.tokenType ?? "Bearer"} ${context.accessToken}`,
   };
@@ -914,15 +915,4 @@ function buildCalHeaders(context: CalActionContext, apiVersion?: string, hasJson
     headers["cal-api-version"] = apiVersion;
   }
   return headers;
-}
-
-function parseProviderScopes(input: string | undefined, fallback: string[]): string[] {
-  if (!input || input.trim().length === 0) {
-    return [...fallback];
-  }
-
-  return input
-    .split(/[,\s]+/u)
-    .map((scope) => scope.trim())
-    .filter((scope) => scope.length > 0);
 }

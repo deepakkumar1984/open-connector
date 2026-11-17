@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -24,8 +23,7 @@ const companycamApiBaseUrl = "https://api.companycam.com/v2";
 const companycamApiOrigin = "https://api.companycam.com";
 
 type CompanycamRequestPhase = "validate" | "execute";
-type CompanycamContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
-type CompanycamActionHandler = (input: Record<string, unknown>, context: CompanycamContext) => Promise<unknown>;
+type CompanycamActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 interface CompanycamRequest {
   apiKey: string;
@@ -225,7 +223,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: companyId ?? "api_key",
         displayName: companyName ?? "CompanyCam Access Token",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: companycamApiBaseUrl,
         validationEndpoint: "/company",

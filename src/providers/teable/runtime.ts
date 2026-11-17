@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -23,7 +22,7 @@ const teableCurrentUserPath = "/auth/user";
 
 type TeableRequestPhase = "validate" | "execute";
 
-interface TeableRequestInput extends Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal"> {
+interface TeableRequestInput extends ApiKeyProviderContext {
   method: string;
   phase: TeableRequestPhase;
   searchParams?: URLSearchParams;
@@ -70,7 +69,6 @@ export async function validateTeableCredential(
   );
   return {
     profile: { displayName: `Teable ${user.name}` },
-    grantedScopes: [],
     metadata: { apiBaseUrl: teableApiBaseUrl, validationEndpoint: teableCurrentUserPath },
   };
 }

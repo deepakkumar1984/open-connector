@@ -20,7 +20,7 @@ type AirfocusHandler = ProviderRuntimeHandler<ApiKeyProviderContext>;
 
 interface AirfocusRequestInput {
   path: string;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: RequestPhase;
   method?: "GET" | "POST" | "PUT" | "DELETE";
   body?: Record<string, unknown>;
@@ -129,7 +129,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: email ?? fullName ?? "airfocus-api-key",
         displayName: fullName ?? email ?? "airfocus Personal Access Token",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: airfocusApiBaseUrl,
         validationEndpoint: profilePath,

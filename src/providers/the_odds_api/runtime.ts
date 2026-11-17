@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { booleanString, compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -127,7 +126,6 @@ export async function validateTheOddsApiCredential(
   const firstSportTitle = optionalString(firstSport?.title);
   return {
     profile: { accountId: firstSportKey ?? "the_odds_api:api-key", displayName: "The Odds API Key" },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: "/v4/sports",
       firstSportKey,
@@ -148,7 +146,7 @@ export function theOddsApiRequestUrl(path: string, apiKey: string, params: Recor
 
 async function theOddsApiRequestJson(
   path: string,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   params: Record<string, string | undefined>,
   phase: "validate" | "execute" = "execute",
 ): Promise<{ payload: unknown; quota: Record<string, unknown> }> {

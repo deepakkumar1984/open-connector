@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -50,7 +49,6 @@ export async function validateTallyCredential(
       accountId: userId ?? email ?? "tally-api-key",
       displayName: label,
     },
-    grantedScopes: [],
     metadata: compactObject({
       apiBaseUrl: tallyApiBaseUrl,
       validationEndpoint: "/users/me",
@@ -91,7 +89,7 @@ function appendPaging(url: URL, input: Record<string, unknown>): void {
 }
 
 async function requestTally(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   pathOrUrl: string | URL,
   phase: "validate" | "execute" = "execute",
 ): Promise<unknown> {

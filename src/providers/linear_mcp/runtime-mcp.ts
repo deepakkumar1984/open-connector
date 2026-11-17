@@ -30,7 +30,6 @@ import {
 import { linearMcpEndpoint } from "./endpoints.ts";
 
 const service = "linear_mcp";
-type LinearMcpContext = Pick<OAuthProviderContext, "accessToken" | "fetcher" | "signal">;
 type LinearMcpToolCall = Awaited<ReturnType<Client["callTool"]>>;
 
 /**
@@ -56,7 +55,7 @@ export const linearMcpToolsByAction: ProviderActionSources<typeof service, strin
 
 /**
  * The tools every grant must serve at sign-in. The writes stay out on purpose: a
- * read-only grant, the default, or an older server may not list them, and a
+ * read-only grant or an older server may not list them, and a
  * credential must not be refused for a tool its grant could never call.
  */
 const linearMcpSignInTools = [
@@ -219,7 +218,7 @@ async function listLinearMcpToolNames(client: Client, signal: AbortSignal): Prom
 
 /** Call one tool in a fresh MCP session and return its text and parsed payload. */
 function callLinearMcpTool(
-  context: LinearMcpContext,
+  context: OAuthProviderContext,
   name: string,
   args: Record<string, unknown>,
 ): Promise<LinearMcpToolResult> {
@@ -396,7 +395,7 @@ function parseLabels(value: unknown): string[] | undefined {
 }
 
 function withLinearMcpClient<T>(
-  context: LinearMcpContext,
+  context: OAuthProviderContext,
   run: (client: Client, signal: AbortSignal) => Promise<T>,
 ): Promise<T> {
   return runProviderRequest({ signal: context.signal, label: "Linear MCP" }, (signal) =>

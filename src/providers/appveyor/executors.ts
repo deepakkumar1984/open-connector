@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import { requireApiKeyCredential } from "../provider-credentials.ts";
@@ -162,7 +161,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: resolvedAccountName,
         displayName: resolvedAccountName ? `AppVeyor ${resolvedAccountName}` : "AppVeyor API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: appveyorApiBaseUrl,
         validationEndpoint: buildAppveyorApiPath(appveyorValidationPath, accountName),
@@ -174,7 +172,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function appveyorGetJson(input: {
-  context: Pick<AppveyorActionContext, "apiKey" | "fetcher" | "signal">;
+  context: AppveyorActionContext;
   accountName?: string;
   path: string;
   phase: AppveyorRequestPhase;

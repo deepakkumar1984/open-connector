@@ -262,9 +262,7 @@ export const printavoActionHandlers: ProviderActionHandlers<"printavo", Printavo
   },
 };
 
-export async function validatePrintavoCredential(
-  input: Pick<PrintavoActionContext, "token" | "email" | "fetcher" | "signal">,
-): Promise<CredentialValidationResult> {
+export async function validatePrintavoCredential(input: PrintavoActionContext): Promise<CredentialValidationResult> {
   const output = await executeIdentify(input, "validate");
   const accountName = optionalRawString(output.account.companyName);
   const userName = optionalRawString(output.user.name);
@@ -276,7 +274,6 @@ export async function validatePrintavoCredential(
       accountId: userId,
       displayName: accountName ?? userName ?? userEmail ?? "Printavo API Token",
     },
-    grantedScopes: [],
     metadata: compactObject({
       apiBaseUrl: printavoApiBaseUrl,
       validationQuery: "user",
@@ -290,7 +287,7 @@ export async function validatePrintavoCredential(
 }
 
 async function executeIdentify(
-  context: Pick<PrintavoActionContext, "token" | "email" | "fetcher" | "signal">,
+  context: PrintavoActionContext,
   phase: PrintavoRequestPhase = "execute",
 ): Promise<{ user: Record<string, unknown>; account: Record<string, unknown> }> {
   const data = await printavoGraphql(identifyQuery, {}, context, phase);
@@ -397,7 +394,7 @@ async function executeConnectionQuery(
 async function printavoGraphql(
   query: string,
   variables: Record<string, unknown>,
-  context: Pick<PrintavoActionContext, "token" | "email" | "fetcher" | "signal">,
+  context: PrintavoActionContext,
   phase: PrintavoRequestPhase,
 ): Promise<Record<string, unknown>> {
   const timeout = createProviderTimeout(context.signal);

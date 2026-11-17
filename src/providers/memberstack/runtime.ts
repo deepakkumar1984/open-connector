@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalBoolean, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -148,7 +147,6 @@ export async function validateMemberstackCredential(
       accountId: "memberstack:secret-key",
       displayName: "Memberstack Secret Key",
     },
-    grantedScopes: [],
     metadata: compactObject({
       apiBaseUrl: memberstackApiBaseUrl,
       validationEndpoint: "/members",
@@ -158,7 +156,7 @@ export async function validateMemberstackCredential(
 }
 
 async function requestMemberstackJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   method: "DELETE" | "GET" | "PATCH" | "POST";
   params?: Record<string, string | undefined>;

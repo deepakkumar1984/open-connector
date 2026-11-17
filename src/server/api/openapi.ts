@@ -14,6 +14,7 @@ import {
   customConnectionInput,
   consoleOAuthConnectionInput,
 } from "./connection-input.ts";
+import { customMcpCreateInput, customMcpUpdateInput, customMcpSyncInput } from "./custom-mcp-input.ts";
 import { policyRequestMaxBytes, policyRuleListMaxItems, policyRuleMaxBytes } from "./policy-input.ts";
 
 /**
@@ -106,9 +107,8 @@ const oauthClientConfigRequestSchema = jsonSchema.object(
         "OAuth app client secret. When updating the default app with the same clientId, omission preserves the stored secret. Required for a new confidential client.",
     }),
     requestedScopes: jsonSchema.array(jsonSchema.string(), {
-      minItems: 1,
       description:
-        "Complete non-empty scope list replacing the provider defaults. Each scope must be declared in scopes or optionalScopes. Omit to request every default scope and no optional scopes.",
+        "OAuth request scopes replacing defaults. Omit for defaults; an empty list requests only required scopes. Unknown scopes are passed to the provider.",
     }),
     redirectUri: jsonSchema.string({
       description:
@@ -406,6 +406,78 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
       type: "string",
       description: "Markdown guide for one action.",
     }),
+    "/api/custom-mcp": {
+      ...getOperation("Catalog", "List administrator-defined MCP services.", {
+        type: "array",
+        items: { $ref: "#/components/schemas/CustomMcpService" },
+      }),
+      post: {
+        tags: ["Catalog"],
+        summary: "Register a remote MCP service.",
+        description:
+          "Administrator access required. Service identifiers default to the name-derived value, may be supplied at creation, and cannot be changed later. Names and service identifiers must be unique across built-in and custom providers. The endpoint and authentication layout are fixed; connection secrets use the existing connection APIs. OAuth discovers and registers a client unless manual configuration is supplied. No-auth services discover tools immediately.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: z.toJSONSchema(customMcpCreateInput, { io: "input" }) } },
+        },
+        responses: {
+          201: jsonResponse({ $ref: "#/components/schemas/CustomMcpService" }),
+          400: jsonResponse(errorResponseSchema),
+          409: jsonResponse(errorResponseSchema),
+          502: jsonResponse(errorResponseSchema),
+        },
+      },
+    },
+    "/api/custom-mcp/{service}": {
+      parameters: [{ name: "service", in: "path", required: true, schema: jsonSchema.string() }],
+      ...getOperation("Catalog", "Get a custom MCP service and its saved tools.", {
+        $ref: "#/components/schemas/CustomMcpService",
+      }),
+      patch: {
+        tags: ["Catalog"],
+        summary: "Rename, enable or disable a custom MCP service.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: z.toJSONSchema(customMcpUpdateInput, { io: "input" }) } },
+        },
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/CustomMcpService" }),
+          400: jsonResponse(errorResponseSchema),
+          404: jsonResponse(errorResponseSchema),
+          409: jsonResponse(errorResponseSchema),
+        },
+      },
+      delete: {
+        tags: ["Catalog"],
+        summary: "Delete a custom MCP service after removing its connections.",
+        responses: {
+          200: jsonResponse(
+            jsonSchema.object({ deleted: { type: "boolean", const: true } }, { required: ["deleted"] }),
+          ),
+          404: jsonResponse(errorResponseSchema),
+          409: jsonResponse(errorResponseSchema),
+        },
+      },
+    },
+    "/api/custom-mcp/{service}/sync": {
+      parameters: [{ name: "service", in: "path", required: true, schema: jsonSchema.string() }],
+      post: {
+        tags: ["Catalog"],
+        summary: "Discover tools using a selected MCP connection.",
+        description:
+          "Replaces the tool snapshot atomically. A failed discovery returns the previous tools with syncError set. Omit connectionId to reuse the previous discovery connection, or the provider default before the first successful sync.",
+        requestBody: {
+          required: true,
+          content: { "application/json": { schema: z.toJSONSchema(customMcpSyncInput, { io: "input" }) } },
+        },
+        responses: {
+          200: jsonResponse({ $ref: "#/components/schemas/CustomMcpService" }),
+          400: jsonResponse(errorResponseSchema),
+          404: jsonResponse(errorResponseSchema),
+          409: jsonResponse(errorResponseSchema),
+        },
+      },
+    },
     "/api/connections": getOperation("Connections", "List local provider connections.", {
       type: "array",
       items: { $ref: "#/components/schemas/ConnectionSummary" },
@@ -719,6 +791,27 @@ export function createOpenApiDocument(options: OpenApiDocumentOptions = {}): Ope
         },
       },
       schemas: {
+        CustomMcpService: jsonSchema.object(
+          {
+            service: jsonSchema.string(),
+            displayName: jsonSchema.string(),
+            endpoint: jsonSchema.string(),
+            transport: { type: "string", enum: ["streamable_http", "sse"] },
+            enabled: jsonSchema.boolean(),
+            revision: jsonSchema.string(),
+            auth: {
+              type: "object",
+              description:
+                "Authentication layout without connection secrets. OAuth contains the resolved definition, not client credentials.",
+            },
+            actions: jsonSchema.array({ $ref: "#/components/schemas/ActionDefinition" }),
+            syncConnectionId: jsonSchema.string(),
+            syncedAt: jsonSchema.string(),
+            syncError: jsonSchema.string(),
+          },
+          { required: ["service", "displayName", "endpoint", "transport", "enabled", "revision", "auth", "actions"] },
+        ),
+
         ActionDefinition: jsonSchema.unknownObject("Public action catalog definition with runtime execution status."),
         LocalAuthSession: jsonSchema.object(
           {
@@ -1858,9 +1951,8 @@ function createOAuthAuthorizationPath(): Record<string, unknown> {
                   description: "Optional connection-scoped OAuth app client secret.",
                 }),
                 requestedScopes: jsonSchema.array(jsonSchema.string(), {
-                  minItems: 1,
                   description:
-                    "Optional complete non-empty scope list replacing the provider defaults. Each scope must be declared in scopes or optionalScopes; default scopes are not added automatically.",
+                    "OAuth request scopes replacing defaults. Required scopes are added automatically. Empty and unknown scopes are accepted.",
                 }),
                 redirectUri: jsonSchema.string({
                   description:
@@ -1915,7 +2007,7 @@ function createOAuthConfigPath(): Record<string, unknown> {
       tags: ["OAuth"],
       summary: "Upsert local OAuth client configuration.",
       description:
-        "Open-source users provide their own OAuth app. requestedScopes replaces the default scope list with an explicit selection from the provider's scopes and optionalScopes; default scopes are not added automatically. Omit it to use the defaults without optional scopes. Undeclared scopes are refused. Additional extra fields are declared by provider catalog auth metadata. For the same clientId, omitted clientSecret and omitted secretExtra keys retain saved secrets. Explicit empty secretExtra values clear optional secrets. Changing clientId requires new secrets.",
+        "Open-source users provide their own OAuth app. requestedScopes replaces the default scope list. Omit it to use defaults; an empty array requests only required scopes. Required scopes are added automatically and unknown scopes are sent to the provider. Additional extra fields are declared by provider catalog auth metadata. For the same clientId, omitted clientSecret and omitted secretExtra keys retain saved secrets. Explicit empty secretExtra values clear optional secrets. Changing clientId requires new secrets.",
       requestBody: {
         required: true,
         content: {
@@ -2181,7 +2273,6 @@ function connectionManagementPaths(): Record<string, unknown> {
     required: jsonSchema.boolean(),
     defaultSelected: jsonSchema.boolean(),
     risk: jsonSchema.stringEnum("How much access the option grants.", ["standard", "sensitive", "destructive"]),
-    requires: jsonSchema.optional(jsonSchema.stringArray("Option ids that must be selected together with this one.")),
   });
   const setup = jsonSchema.object("Setup requirements and OAuth client state for one provider, without saved values.", {
     service: jsonSchema.string(),
@@ -2202,13 +2293,14 @@ function connectionManagementPaths(): Record<string, unknown> {
             steps: jsonSchema.stringArray("Ordered setup steps."),
           }),
         ),
+        supportsScopeSelection: jsonSchema.optional(
+          jsonSchema.boolean("Whether the provider accepts an OAuth scope parameter."),
+        ),
         scopes: jsonSchema.optional(
           jsonSchema.stringArray("Default provider scopes when no explicit selection is made."),
         ),
-        optionalScopes: jsonSchema.optional(
-          jsonSchema.stringArray(
-            "Additional provider scopes for explicit selection. requestedScopes replaces the default scope list.",
-          ),
+        requiredScopes: jsonSchema.optional(
+          jsonSchema.stringArray("Scopes automatically added to OAuth requests for connection validation or renewal."),
         ),
         authorizationOptions: jsonSchema.optional(jsonSchema.array(authorizationOption)),
       }),

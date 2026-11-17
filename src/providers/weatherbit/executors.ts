@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { compactObject, optionalInteger, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -59,7 +58,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: "weatherbit",
         displayName: "Weatherbit API Key",
       },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/v2.0/current",
         apiBaseUrl: weatherbitApiBaseUrl,
@@ -73,7 +71,7 @@ export const credentialValidators: CredentialValidators = {
 
 async function executeCurrentWeather(
   input: Record<string, unknown>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: WeatherbitPhase,
 ): Promise<{ observations: Array<Record<string, unknown>>; count: number }> {
   const payload = await weatherbitJsonRequest("/v2.0/current", buildCurrentWeatherQuery(input), context, phase);
@@ -103,7 +101,7 @@ async function executeForecast(
 async function weatherbitJsonRequest(
   path: string,
   query: Record<string, WeatherbitQueryValue>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: WeatherbitPhase,
 ): Promise<Record<string, unknown>> {
   const url = new URL(path, weatherbitApiBaseUrl);

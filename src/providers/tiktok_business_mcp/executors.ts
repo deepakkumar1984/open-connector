@@ -13,10 +13,7 @@ const service = "tiktok_business_mcp";
 const endpoint = "https://business-api.tiktok.com/open_mcp/tt-ads-mcp-flat";
 const requestTimeoutMs = 60_000;
 
-async function withTikTokMcpClient<T>(
-  context: Pick<OAuthProviderContext, "accessToken" | "fetcher" | "signal">,
-  run: (client: Client) => Promise<T>,
-): Promise<T> {
+async function withTikTokMcpClient<T>(context: OAuthProviderContext, run: (client: Client) => Promise<T>): Promise<T> {
   return withMcpClient(
     {
       endpoint: new URL(endpoint),
@@ -74,7 +71,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: `tiktok-business-mcp:${tokenHash}`,
         displayName: `TikTok for Business MCP - ${tokenHash.slice(-6)}`,
       },
-      grantedScopes: ["mcp:tt4b"],
       metadata: {
         mcpEndpoint: endpoint,
         discoveredToolCount: result.tools.length,

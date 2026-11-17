@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { booleanString, compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
@@ -15,7 +14,6 @@ import {
 export const beeminderApiBaseUrl = "https://www.beeminder.com/api/v1";
 
 type BeeminderPhase = "validate" | "execute";
-type BeeminderContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
 type BeeminderActionHandler = ProviderRuntimeHandler<ApiKeyProviderContext>;
 
 export const beeminderActionHandlers: ProviderActionHandlers<"beeminder", BeeminderActionHandler> = {
@@ -169,7 +167,6 @@ export async function validateBeeminderCredential(
       accountId: user.username || "beeminder-api-token",
       displayName: user.username ? `Beeminder ${user.username}` : "Beeminder API Token",
     },
-    grantedScopes: [],
     metadata: compactObject({
       username: user.username || undefined,
       timezone: user.timezone ?? undefined,
@@ -184,7 +181,7 @@ async function requestBeeminderJson(input: {
   path: string;
   query?: Record<string, string | undefined>;
   form?: Record<string, string | undefined>;
-  context: BeeminderContext;
+  context: ApiKeyProviderContext;
   phase: BeeminderPhase;
 }): Promise<unknown> {
   const timeout = createProviderTimeout(input.context.signal);

@@ -4,6 +4,7 @@ import type { ActionSearchIndexProvider } from "../core/action-search.ts";
 import type { ProviderHttpDispatchOptions } from "../core/provider-http-dispatch.ts";
 import type { ProviderNetworkPolicy } from "../core/provider-network-policy.ts";
 import type { RuntimeLogger, TransitFileUpload } from "../core/types.ts";
+import type { CustomMcpService } from "../custom-mcp/service.ts";
 import type { MarketplaceService } from "../marketplace/marketplace-service.ts";
 import type { OAuthClientConfigService } from "../oauth/oauth-client-config-service.ts";
 import type { OAuthFlowService } from "../oauth/oauth-flow-service.ts";
@@ -16,6 +17,7 @@ import type { TriggerRunner } from "../triggers/trigger-runner.ts";
 import type { LocalAuthOptions } from "./api/auth.ts";
 import type { PolicySnapshotProvider } from "./api/policy-snapshot.ts";
 import type { ITransitFileService } from "./files/transit-file-store.ts";
+import type { McpOutputMode } from "./mcp-settings.ts";
 import type { OAuthServerSettings } from "./oauth/settings.ts";
 import type { IIdempotencyStore } from "./storage/idempotency-store.ts";
 import type {
@@ -43,6 +45,7 @@ import { getResponseCachePolicy } from "./api/cache-policy.ts";
 import { createConnectionRoutes } from "./api/connection-routes.ts";
 import { createConsoleCatalogRoutes } from "./api/console-catalog-routes.ts";
 import { createConsoleOAuthRoutes } from "./api/console-oauth-routes.ts";
+import { createCustomMcpRoutes } from "./api/custom-mcp-routes.ts";
 import { createDocsRoutes, loadDocsHandler } from "./api/docs-routes.ts";
 import { createEventVerificationRoutes } from "./api/event-verification-routes.ts";
 import { HttpRequestError, internalError, jsonError, notFound } from "./api/http-utils.ts";
@@ -79,6 +82,7 @@ export async function preloadOptionalServerModules(): Promise<void> {
  * Dependencies required to construct the local connector server.
  */
 export interface IConnectServerOptions {
+  customMcp?: CustomMcpService;
   network?: ProviderNetworkPolicy;
   providerHttpDispatch?: ProviderHttpDispatchOptions;
   catalog: CatalogStore;
@@ -119,6 +123,7 @@ export interface IConnectServerOptions {
   logger?: RuntimeLogger;
   compressApiResponses?: boolean;
   serveDocumentation?: boolean;
+  mcpOutputMode?: McpOutputMode;
   /** Seconds the OAuth completion page waits before closing its window. `0` closes it as soon as it loads. */
   oauthCloseDelaySeconds?: number;
   /** Origins a provider-refusal page may post its result to (`OOMOL_CONNECT_OAUTH_RESULT_ORIGINS`). */
@@ -193,6 +198,7 @@ export class ConnectServer {
         context.req.path,
         context.res.status,
         context.req.query("locale") !== undefined,
+        this.options.customMcp !== undefined,
       );
       if (cachePolicy) {
         context.header("Cache-Control", cachePolicy.cacheControl);
@@ -214,6 +220,18 @@ export class ConnectServer {
       app.use("/api/*", compress());
     }
     app.use("*", createLocalAuthMiddleware(auth));
+    const customMcp = this.options.customMcp;
+    if (customMcp) {
+      app.use("*", async (_context, next) => customMcp.catalog.withSnapshot(next));
+      app.route(
+        "/api/custom-mcp",
+        createCustomMcpRoutes({
+          mcp: customMcp,
+          connections: this.options.connections,
+          publicOrigin: this.options.publicOrigin,
+        }),
+      );
+    }
 
     app.route(
       "/v1",
@@ -273,6 +291,7 @@ export class ConnectServer {
         connections: this.options.connections,
         actions: this.options.actions,
         actionSearch: this.actionSearch,
+        outputMode: this.options.mcpOutputMode,
         getPolicySnapshot: this.getPolicySnapshot,
       }),
     );

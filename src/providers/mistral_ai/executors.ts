@@ -10,6 +10,7 @@ import type {
   ProviderActionName,
   ProviderActionSources,
 } from "../provider-executors.ts";
+import type { ProviderRequestContext } from "../provider-runtime.ts";
 
 import { base64Bytes, compactObject, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import {
@@ -214,7 +215,6 @@ export const credentialValidators: CredentialValidators = {
       profile: {
         displayName: "Mistral AI API Key",
       },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/v1/models",
         availableModels: (payload.data ?? [])
@@ -251,7 +251,7 @@ async function executeMistralAction(
 async function executeJsonMistralAction(
   input: Record<string, unknown>,
   spec: MistralActionSpec,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
 ): Promise<unknown> {
   const { url, remainingInput } = buildMistralUrl(spec, input);
   const requestInit: RequestInit = {
@@ -504,7 +504,7 @@ async function readRemoteUploadSource(
   fileUrl: string,
   fileName: string,
   mimeType: string | undefined,
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">,
+  context: ProviderRequestContext,
 ): Promise<UploadSource> {
   const url = readPublicFileUrl(fileUrl, "file.url");
   const response = await context.fetcher(url, {

@@ -24,7 +24,6 @@ import {
   providerUserAgent,
   requiredInputString,
 } from "../provider-runtime.ts";
-import { figmaPersonalAccessTokenScopes } from "./scopes.ts";
 
 const service = "figma";
 const figmaApiBaseUrl = "https://api.figma.com";
@@ -213,7 +212,6 @@ export const credentialValidators: CredentialValidators = {
 
     return {
       profile: normalizeFigmaCurrentAccount(user),
-      grantedScopes: [...figmaPersonalAccessTokenScopes],
       metadata: {
         apiBaseUrl: figmaApiBaseUrl,
         validationEndpoint: "/v1/me",
@@ -784,13 +782,10 @@ function createFigmaError(
   if (phase === "validate" && (status === 401 || status === 403)) {
     return new ProviderRequestError(400, message, payload);
   }
-  if (phase === "execute" && (status === 401 || status === 403)) {
-    return new ProviderRequestError(401, message, payload);
-  }
   if ([400, 404, 422].includes(status)) {
     return new ProviderRequestError(400, message, payload);
   }
-  return new ProviderRequestError(status || 502, message, payload);
+  return new ProviderRequestError(status || 502, message, payload, "provider_error");
 }
 
 function extractFigmaErrorMessage(payload: unknown): string | undefined {

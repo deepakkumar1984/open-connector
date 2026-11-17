@@ -8,6 +8,7 @@ import { optionalRecord, optionalString, stringRecord } from "../core/cast.ts";
 import { isOAuthCredentialExpired } from "../credential-resolver.ts";
 import { providerFetch } from "../providers/provider-runtime.ts";
 import { readOAuthClientConfigMetadata } from "./oauth-client-config-service.ts";
+import { readOAuthScopes } from "./oauth-scopes.ts";
 import { expiresAtFromLifetime, requestRefreshToken, requestTokenRevocation } from "./oauth-token.ts";
 
 type OAuthCredential = Extract<ResolvedCredential, { authType: "oauth2" }>;
@@ -78,7 +79,7 @@ export class OAuthCredentialRefreshService implements IOAuthCredentialRefresher 
         clientSecret: config.clientSecret,
         responseEnvelope: auth.tokenResponseEnvelope,
         refreshToken,
-        extraFields: readOAuthRefreshParameters(credential.providerSecret),
+        extraFields: readOAuthRefreshParameters(credential.providerSecret, auth.resource),
         tokenRequestFields: auth.tokenRequestFields,
         tokenEndpointAuthMethod: auth.tokenEndpointAuthMethod,
         tokenRequestFormat: auth.tokenRequestFormat,
@@ -115,7 +116,10 @@ export class OAuthCredentialRefreshService implements IOAuthCredentialRefresher 
       // the stored token would look expired immediately and refresh on every call.
       expiresAt: refreshed.expiresAt ?? expiresAtFromLifetime(expiresIn),
       providerSecret: refreshed.providerSecret ?? credential.providerSecret,
-      profile: credential.profile,
+      profile: {
+        ...credential.profile,
+        grantedScopes: readOAuthScopes(refreshed.metadata.scope) ?? credential.profile.grantedScopes,
+      },
       metadata: {
         ...metadata,
         // Refresh rotates tokens within the existing authorization, including legacy absence.
@@ -189,9 +193,10 @@ export class OAuthCredentialRefreshService implements IOAuthCredentialRefresher 
 
 function readOAuthRefreshParameters(
   providerSecret: Record<string, unknown> | undefined,
+  resource?: string,
 ): Record<string, string> | undefined {
   const value = optionalRecord(providerSecret?.oauthRefreshParameters);
-  if (!value) return undefined;
-  const fields = stringRecord(value);
+  const fields = value ? stringRecord(value) : {};
+  if (resource) fields.resource = resource;
   return Object.keys(fields).length > 0 ? fields : undefined;
 }

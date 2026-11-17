@@ -5,8 +5,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import { compactJson, queryParams } from "../../core/request.ts";
@@ -181,7 +180,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: optionalString(firstTeam?.id) ?? "chatbotkit-api-key",
         displayName: optionalString(firstTeam?.name) ?? "ChatBotKit API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         validationEndpoint: "/team/list",
         apiBaseUrl,
@@ -213,7 +211,7 @@ function buildListQuery(input: Record<string, unknown>): Record<string, unknown>
 }
 
 async function requestChatbotkit(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   path: string,
   options: { method?: "GET" | "POST"; query?: Record<string, unknown>; body?: unknown } = {},
 ): Promise<unknown> {

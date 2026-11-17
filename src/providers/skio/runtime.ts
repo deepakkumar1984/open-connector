@@ -5,6 +5,7 @@ import type {
   ProviderActionSources,
   ProviderRuntimeHandler,
 } from "../provider-executors.ts";
+import type { ProviderRequestContext } from "../provider-runtime.ts";
 
 import { optionalRecord, optionalString } from "../../core/cast.ts";
 import { mapProviderActionSources } from "../provider-executors.ts";
@@ -121,7 +122,6 @@ export async function validateSkioCredential(
     profile: {
       displayName: "Skio API Key",
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: skioApiBaseUrl,
       validationEndpoint: `${validationPath}?first=1`,
@@ -134,7 +134,7 @@ async function requestSkioJson(input: {
   apiKey: string;
   path: string;
   phase: SkioPhase;
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">;
+  context: ProviderRequestContext;
   query?: URLSearchParams;
 }): Promise<unknown> {
   return runProviderRequest({ signal: input.context.signal, label: "Skio" }, async (signal) => {

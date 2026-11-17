@@ -1,6 +1,6 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
 import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ProviderFetch } from "../provider-runtime.ts";
+import type { ProviderRequestContext, ProviderFetch } from "../provider-runtime.ts";
 
 import {
   compactObject,
@@ -131,7 +131,6 @@ export const credentialValidators: CredentialValidators = {
         accountId,
         displayName: "Cloudflare Browser Run",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: cloudflareBrowserRenderingApiBaseUrl,
         validationEndpoint,
@@ -157,7 +156,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: user.userId,
         displayName,
       },
-      grantedScopes: input.profile.grantedScopes,
       metadata: compactObject({
         apiBaseUrl: cloudflareBrowserRenderingApiBaseUrl,
         validationEndpoint: "/user",
@@ -183,7 +181,7 @@ async function listAccounts(
 
 async function requestOAuthAccounts(
   accessToken: string,
-  context: Pick<CloudflareBrowserRenderingContext, "fetcher" | "signal">,
+  context: ProviderRequestContext,
   input: { page?: number; perPage?: number } = {},
   phase: CloudflareRequestPhase = "execute",
 ): Promise<{ accounts: Array<Record<string, unknown>>; resultInfo: Record<string, unknown> }> {
@@ -209,7 +207,7 @@ async function requestOAuthAccounts(
 
 async function requestAccounts(
   accessToken: string,
-  context: Pick<CloudflareBrowserRenderingContext, "fetcher" | "signal">,
+  context: ProviderRequestContext,
   input: { page?: number; perPage?: number } = {},
 ): Promise<{ accounts: Array<Record<string, unknown>>; resultInfo: Record<string, unknown> }> {
   const envelope = await cloudflareRequestEnvelope(
@@ -439,7 +437,7 @@ async function cloudflareRequestEnvelope(
     query?: Record<string, QueryValue>;
     body?: Record<string, unknown>;
   },
-  context: Pick<CloudflareBrowserRenderingContext, "fetcher" | "signal">,
+  context: ProviderRequestContext,
   phase: CloudflareRequestPhase,
 ): Promise<CloudflareEnvelope> {
   let response: Response;

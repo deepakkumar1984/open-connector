@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
@@ -49,7 +48,6 @@ export async function validateScreenshotoneApiKey(
     profile: {
       displayName: "ScreenshotOne API Key",
     },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: screenshotoneUsagePath,
       apiBaseUrl: screenshotoneApiBaseUrl,
@@ -67,9 +65,7 @@ async function getScreenshotoneUsage(context: ApiKeyProviderContext): Promise<un
   return requestScreenshotoneUsage(context);
 }
 
-async function requestScreenshotoneUsage(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
-): Promise<{
+async function requestScreenshotoneUsage(context: ApiKeyProviderContext): Promise<{
   total: number;
   available: number;
   used: number;

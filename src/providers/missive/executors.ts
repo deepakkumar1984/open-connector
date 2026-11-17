@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalBoolean, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -18,7 +17,7 @@ type MissiveActionHandler = (input: Record<string, unknown>, context: ApiKeyProv
 interface MissiveRequestOptions {
   path: string;
   query?: Record<string, unknown>;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase?: MissiveRequestPhase;
   notFoundAsInvalidInput?: boolean;
 }
@@ -149,7 +148,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: userId ? `missive:user:${userId}` : "missive:token",
         displayName: optionalString(currentUser?.display_name) ?? userEmail ?? "Missive API Token",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: missiveApiBaseUrl,
         validationEndpoint: missiveValidationPath,

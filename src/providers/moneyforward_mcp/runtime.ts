@@ -102,7 +102,6 @@ export async function validateMoneyforwardMcpCredential(
       accountId: `${moneyforwardService}:${keyHash}`,
       displayName: `Money Forward MCP · ${keyHash.slice(-6)}`,
     },
-    grantedScopes: [],
     metadata: { mcpEndpoint: moneyforwardMcpEndpoint, schemaDrift },
   };
 }
@@ -301,7 +300,7 @@ function createWriteLimiter(writesPerMinute: number): (apiKey: string) => void {
 // protocolVersion is deliberately left unset (legacy): in modern mode the SDK re-sends tools/call
 // on a SEP-2243 header mismatch, which would be a silent write retry.
 function toolOptions(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher">,
+  context: ApiKeyProviderContext,
   signal: AbortSignal | undefined,
   timing: MoneyforwardRuntimeOptions,
 ): McpToolOptions {

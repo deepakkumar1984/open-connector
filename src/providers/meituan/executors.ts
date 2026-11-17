@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { createHash } from "node:crypto";
 import { optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
@@ -40,8 +39,6 @@ interface MeituanTravelRequest {
   city: string;
   originQuery: string;
 }
-
-type MeituanContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
 
 const meituanActionHandlers: ProviderActionHandlers<"meituan", ProviderRuntimeHandler<ApiKeyProviderContext>> = {
   query_travel(input, context) {
@@ -82,14 +79,13 @@ export const credentialValidators: CredentialValidators = {
         accountId: `meituan:personal:${tokenHash}`,
         displayName: `Meituan Personal Developer · ${tokenHash.slice(-6)}`,
       },
-      grantedScopes: [],
     };
   },
 };
 
 async function requestMeituanTravel(
   request: MeituanTravelRequest,
-  context: MeituanContext,
+  context: ApiKeyProviderContext,
 ): Promise<{ content: string }> {
   const timeout = createProviderTimeout(context.signal, meituanRequestTimeoutMs);
 

@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { compactObject, optionalBoolean, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
@@ -79,7 +78,6 @@ export async function validateButtondownCredential(
       accountId: emailAddress ?? username ?? "buttondown:api_key",
       displayName: emailAddress ?? username ?? "Buttondown Account",
     },
-    grantedScopes: [],
     metadata: compactObject({
       username,
       email_address: emailAddress,
@@ -318,7 +316,7 @@ async function deleteTag(
 async function requestJson(
   path: string,
   init: RequestInit,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: ButtondownPhase,
 ): Promise<unknown> {
   const response = await buttondownFetch(path, { ...init, ...context });
@@ -329,11 +327,7 @@ async function requestJson(
   return payload;
 }
 
-async function requestNoContent(
-  path: string,
-  init: RequestInit,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
-): Promise<void> {
+async function requestNoContent(path: string, init: RequestInit, context: ApiKeyProviderContext): Promise<void> {
   const response = await buttondownFetch(path, { ...init, ...context });
   const payload = await readButtondownPayload(response);
   if (!response.ok) {

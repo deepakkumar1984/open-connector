@@ -58,7 +58,6 @@ export async function validateTypesafeAiCredential(
   const models = parseModels(payload);
   return {
     profile: { accountId: "api_key", displayName: "TypeSafe AI API Key" },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: typesafeAiApiBaseUrl,
       validationEndpoint: "/v1/models",
@@ -75,7 +74,7 @@ interface TypesafeAiRequestOptions {
 async function requestTypesafeAiJson(
   path: string,
   options: TypesafeAiRequestOptions,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: TypesafeAiRequestPhase,
 ): Promise<unknown> {
   return runProviderRequest({ label: "TypeSafe AI", signal: context.signal }, async (signal) => {

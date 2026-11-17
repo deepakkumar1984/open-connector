@@ -7,6 +7,7 @@ import type {
   TransitFileWriter,
 } from "../../core/types.ts";
 import type { ProviderActionHandlers } from "../provider-executors.ts";
+import type { ProviderRequestContext } from "../provider-runtime.ts";
 
 import { createHash } from "node:crypto";
 import { basename } from "node:path";
@@ -238,7 +239,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: context.clientId,
         displayName: `Foxit Cloud API - ${context.clientId}`,
       },
-      grantedScopes: [],
       metadata: {
         clientId: context.clientId,
         validationEndpoint: "/user/stock",
@@ -380,10 +380,7 @@ async function fuxinDownloadFile(input: Record<string, unknown>, context: FuxinA
   };
 }
 
-async function fuxinGetUserStock(
-  context: Pick<FuxinActionContext, "clientId" | "secret" | "fetcher" | "signal">,
-  phase: FuxinRequestPhase = "execute",
-): Promise<unknown> {
+async function fuxinGetUserStock(context: FuxinActionContext, phase: FuxinRequestPhase = "execute"): Promise<unknown> {
   const data = await fuxinRequestData({
     method: "GET",
     path: "/user/stock",
@@ -980,7 +977,7 @@ async function appendFuxinDocumentSource(input: FuxinDocumentSourceInput): Promi
 
 async function resolveFuxinMultipartSource(
   input: Record<string, unknown>,
-  context: Pick<FuxinActionContext, "fetcher" | "signal">,
+  context: ProviderRequestContext,
   options: {
     fallbackBaseName: string;
     fallbackMimeType?: string;

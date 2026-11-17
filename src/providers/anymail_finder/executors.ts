@@ -76,7 +76,6 @@ export const credentialValidators: CredentialValidators = {
     const email = readString(payload, "email");
     return {
       profile: { accountId: email, displayName: email },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl,
         validationEndpoint: "/v5.1/account",
@@ -113,7 +112,7 @@ async function post(
 
 async function request(
   path: string,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   init: RequestInit = {},
 ): Promise<Record<string, unknown>> {
   let response: Response;

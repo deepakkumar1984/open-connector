@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -17,8 +16,7 @@ const formbricksApiBaseUrl = "https://app.formbricks.com/api/v2";
 const formbricksValidationPath = "/me";
 
 type FormbricksRequestMode = "validate" | "execute";
-type FormbricksActionContext = ApiKeyProviderContext;
-type FormbricksActionHandler = (input: Record<string, unknown>, context: FormbricksActionContext) => Promise<unknown>;
+type FormbricksActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 interface FormbricksRequestInput {
   path: string;
@@ -156,7 +154,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: payload.organizationId,
         displayName: `Formbricks organization ${payload.organizationId}`,
       },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl: formbricksApiBaseUrl,
         validationEndpoint: formbricksValidationPath,
@@ -169,7 +166,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function requestFormbricksJson(
-  context: Pick<FormbricksActionContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   input: FormbricksRequestInput,
 ): Promise<Record<string, unknown>> {
   const timeoutSignal = AbortSignal.timeout(defaultProviderRequestTimeoutMs);

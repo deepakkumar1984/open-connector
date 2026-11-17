@@ -1,5 +1,4 @@
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { compactObject } from "../../core/cast.ts";
 import { ProviderRequestError, providerInputError } from "../provider-runtime.ts";
@@ -28,7 +27,6 @@ export async function validateDeutschlandgptCredential(
   signal?: AbortSignal,
 ): Promise<{
   profile: { accountId: string; displayName: string };
-  grantedScopes: string[];
   metadata: Record<string, unknown>;
 }> {
   const payload = await request("/models", "GET", undefined, { apiKey, fetcher, signal }, true);
@@ -36,7 +34,6 @@ export async function validateDeutschlandgptCredential(
   if (!Array.isArray(record.data)) throw new ProviderRequestError(502, "DeutschlandGPT response missing models data");
   return {
     profile: { accountId: `deutschlandgpt:${apiKey.slice(-8)}`, displayName: "DeutschlandGPT API Key" },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: deutschlandgptApiBaseUrl,
       availableModels: record.data.flatMap((item) => {
@@ -51,7 +48,7 @@ async function request(
   path: string,
   method: string,
   body: Record<string, unknown> | undefined,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   validating = false,
 ): Promise<unknown> {
   const response = await context.fetcher(`${deutschlandgptApiBaseUrl}${path}`, {

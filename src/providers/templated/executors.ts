@@ -4,8 +4,8 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderRequestContext } from "../provider-runtime.ts";
 
 import {
   compactObject,
@@ -164,7 +164,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: optionalString(account.id) ?? optionalString(account.email) ?? "templated-account",
         displayName: optionalString(account.name) ?? optionalString(account.email) ?? "Templated",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: templatedApiBaseUrl,
         validationEndpoint: "/account",
@@ -179,7 +178,7 @@ export const credentialValidators: CredentialValidators = {
 async function requestTemplatedJson(input: {
   apiKey: string;
   path: string;
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">;
+  context: ProviderRequestContext;
   phase: TemplatedRequestPhase;
   method?: "GET" | "POST";
   query?: Record<string, string | number | boolean | undefined>;
@@ -197,7 +196,7 @@ async function requestTemplatedJson(input: {
 async function requestTemplatedAck(input: {
   apiKey: string;
   path: string;
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">;
+  context: ProviderRequestContext;
   phase: TemplatedRequestPhase;
   notFoundAsInvalidInput?: boolean;
 }): Promise<void> {
@@ -214,7 +213,7 @@ async function requestTemplatedAck(input: {
 async function templatedFetch(input: {
   apiKey: string;
   path: string;
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">;
+  context: ProviderRequestContext;
   method?: "GET" | "POST" | "DELETE";
   query?: Record<string, string | number | boolean | undefined>;
   body?: Record<string, unknown>;

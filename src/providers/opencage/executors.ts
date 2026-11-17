@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -72,7 +71,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: "opencage",
         displayName: "OpenCage API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         validationEndpoint: "/geocode/v1/json",
         apiBaseUrl: opencageApiBaseUrl,
@@ -87,7 +85,7 @@ export const credentialValidators: CredentialValidators = {
 async function opencageRequest(
   format: "json" | "geojson",
   query: Record<string, string | undefined>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: OpencagePhase,
 ): Promise<unknown> {
   let response: Response;

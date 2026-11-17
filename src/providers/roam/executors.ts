@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -123,7 +122,6 @@ export const credentialValidators: CredentialValidators = {
       profile: {
         displayName: "Roam HQ API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: roamApiBaseUrl,
         validationEndpoint: "/test",
@@ -134,7 +132,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function requestRoamJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   phase: RoamRequestPhase;
   method?: string;

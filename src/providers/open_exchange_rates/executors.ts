@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalBoolean, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -105,7 +104,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: "open_exchange_rates",
         displayName: "Open Exchange Rates App ID",
       },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/latest.json",
         apiBaseUrl: openExchangeRatesApiBaseUrl,
@@ -117,7 +115,7 @@ export const credentialValidators: CredentialValidators = {
 async function openExchangeRatesRequest(input: {
   path: string;
   query: Record<string, OpenExchangeRatesQueryValue>;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   includeAppId?: boolean;
   phase?: "validate" | "execute";
 }): Promise<unknown> {

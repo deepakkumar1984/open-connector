@@ -1,6 +1,5 @@
 import type { CredentialValidationResult, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -168,9 +167,7 @@ export async function validateRebrandlyCredential(
     profile: {
       accountId: accountId ?? "rebrandly-api-key",
       displayName: fullName ?? email ?? "Rebrandly API Key",
-      grantedScopes: [],
     },
-    grantedScopes: [],
     metadata: {
       validationEndpoint: validationPath,
       apiBaseUrl: rebrandlyApiBaseUrl,
@@ -191,7 +188,7 @@ export const credentialValidators = {
 };
 
 async function requestRebrandlyJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   mode: "validate" | "execute";
   method?: string;

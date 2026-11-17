@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { optionalBoolean, optionalInteger, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -100,7 +99,6 @@ export const credentialValidators: CredentialValidators = {
     );
     return {
       profile: { accountId: "ritekit", displayName: "RiteKit Client ID" },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/v1/search/trending",
         sampleTagCount: normalizeTrending(payload.tags).length,
@@ -123,7 +121,7 @@ async function requestSuggestions(
 }
 
 async function requestRiteKit(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   path: string,
   query: QueryEntry[],
   phase: RiteKitPhase = "execute",

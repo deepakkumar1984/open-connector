@@ -23,7 +23,7 @@ type RequestPhase = "validate" | "execute";
 type YoplanningHandler = ProviderRuntimeHandler<ApiKeyProviderContext>;
 
 interface YoplanningRequestInput {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   query?: Record<string, string | number | undefined>;
   phase: RequestPhase;
@@ -146,7 +146,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: firstTeamId ? `yoplanning:team:${firstTeamId}` : "yoplanning-api-token",
         displayName: firstTeamName ?? "YoPlanning API Token",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: yoplanningApiBaseUrl,
         accessibleTeamCount: payload.count,

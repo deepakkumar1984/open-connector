@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -108,7 +107,6 @@ export const credentialValidators: CredentialValidators = {
       profile: {
         displayName: "Appstle Subscriptions API Key",
       },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl: appstleSubscriptionsApiBaseUrl,
         validationEndpoint: "/api/external/v2/subscription-contract-details/customers",
@@ -118,7 +116,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function requestAppstleSubscriptionsJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   phase: AppstleSubscriptionsRequestPhase;
   searchParams?: URLSearchParams;
@@ -133,7 +131,7 @@ async function requestAppstleSubscriptionsJson(input: {
 }
 
 async function requestAppstleSubscriptions(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   searchParams?: URLSearchParams;
 }): Promise<Response> {

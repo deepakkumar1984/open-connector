@@ -1,6 +1,5 @@
 import type { CredentialValidationResult, ProviderExecutors } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -93,7 +92,6 @@ export async function validatePlacekeyCredential(
     profile: {
       accountId: "placekey-api-key",
       displayName: "Placekey API key",
-      grantedScopes: [],
     },
     metadata: {
       apiBaseUrl: placekeyApiBaseUrl,
@@ -104,7 +102,7 @@ export async function validatePlacekeyCredential(
 }
 
 async function requestPlacekey(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   path: string,
   body: Record<string, unknown>,
   phase: "validate" | "execute" = "execute",

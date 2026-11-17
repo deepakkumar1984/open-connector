@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import {
@@ -19,8 +18,7 @@ const brevoValidationPath = "/v3/account";
 type BrevoRequestMode = "validate" | "execute";
 type BrevoMethod = "GET" | "POST" | "PUT" | "DELETE";
 type BrevoQueryValue = string | number | undefined;
-type BrevoActionContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
-type BrevoActionHandler = (input: Record<string, unknown>, context: BrevoActionContext) => Promise<unknown>;
+type BrevoActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 interface BrevoRequestOptions {
   apiKey: string;
@@ -99,7 +97,6 @@ export async function validateBrevoCredential(
       accountId: organizationId !== undefined ? `brevo:account:${organizationId}` : "brevo:api_key",
       displayName: email ?? companyName ?? "Brevo API Key",
     },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: brevoValidationPath,
       email,
@@ -109,7 +106,7 @@ export async function validateBrevoCredential(
   };
 }
 
-async function getAccount(context: BrevoActionContext): Promise<unknown> {
+async function getAccount(context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: brevoValidationPath,
@@ -119,7 +116,7 @@ async function getAccount(context: BrevoActionContext): Promise<unknown> {
   });
 }
 
-async function listContacts(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function listContacts(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: "/v3/contacts",
@@ -136,7 +133,7 @@ async function listContacts(input: Record<string, unknown>, context: BrevoAction
   });
 }
 
-async function getContact(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function getContact(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: `/v3/contacts/${encodeURIComponent(requiredInputString(input.identifier, "identifier"))}`,
@@ -149,7 +146,7 @@ async function getContact(input: Record<string, unknown>, context: BrevoActionCo
   });
 }
 
-async function createContact(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function createContact(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: "/v3/contacts",
@@ -168,7 +165,7 @@ async function createContact(input: Record<string, unknown>, context: BrevoActio
   });
 }
 
-async function deleteContact(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function deleteContact(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   await requestBrevoNoContent({
     apiKey: context.apiKey,
     path: `/v3/contacts/${encodeURIComponent(requiredInputString(input.identifier, "identifier"))}`,
@@ -184,7 +181,7 @@ async function deleteContact(input: Record<string, unknown>, context: BrevoActio
   return { success: true };
 }
 
-async function listContactFolders(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function listContactFolders(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: "/v3/contacts/folders",
@@ -195,7 +192,7 @@ async function listContactFolders(input: Record<string, unknown>, context: Brevo
   });
 }
 
-async function listContactLists(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function listContactLists(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: "/v3/contacts/lists",
@@ -206,7 +203,7 @@ async function listContactLists(input: Record<string, unknown>, context: BrevoAc
   });
 }
 
-async function createContactList(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function createContactList(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: "/v3/contacts/lists",
@@ -221,7 +218,7 @@ async function createContactList(input: Record<string, unknown>, context: BrevoA
   });
 }
 
-async function updateContactList(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function updateContactList(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   await requestBrevoNoContent({
     apiKey: context.apiKey,
     path: `/v3/contacts/lists/${String(readRequiredInteger(input.listId, "listId"))}`,
@@ -238,7 +235,7 @@ async function updateContactList(input: Record<string, unknown>, context: BrevoA
   return { success: true };
 }
 
-async function listContactsInList(input: Record<string, unknown>, context: BrevoActionContext): Promise<unknown> {
+async function listContactsInList(input: Record<string, unknown>, context: ApiKeyProviderContext): Promise<unknown> {
   return requestBrevoJson({
     apiKey: context.apiKey,
     path: `/v3/contacts/lists/${String(readRequiredInteger(input.listId, "listId"))}/contacts`,
@@ -254,7 +251,7 @@ async function listContactsInList(input: Record<string, unknown>, context: Brevo
 
 async function mutateListMembers(
   input: Record<string, unknown>,
-  context: BrevoActionContext,
+  context: ApiKeyProviderContext,
   mode: "add" | "remove",
 ): Promise<unknown> {
   return requestBrevoJson({

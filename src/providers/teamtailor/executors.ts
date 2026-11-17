@@ -4,9 +4,8 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
-import type { ProviderFetch } from "../provider-runtime.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderRequestContext, ProviderFetch } from "../provider-runtime.ts";
 
 import { compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
 import { requireApiKeyCredential } from "../provider-credentials.ts";
@@ -122,7 +121,6 @@ export const credentialValidators: CredentialValidators = {
       profile: {
         displayName: `Teamtailor ${stack.toUpperCase()} API Key`,
       },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl: getTeamtailorBaseUrl(stack),
         apiVersion: teamtailorApiVersion,
@@ -161,7 +159,7 @@ async function requestTeamtailorJson(input: {
   apiKey: string;
   stack: TeamtailorStack;
   path: string;
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">;
+  context: ProviderRequestContext;
   phase: TeamtailorPhase;
   query?: Record<string, string | undefined>;
   notFoundAsInvalidInput?: boolean;

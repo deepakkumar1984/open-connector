@@ -106,7 +106,7 @@ function extractPdfResources(payload: Record<string, unknown>) {
           resources.push({ field, url: url.href });
         }
       } catch {
-        /* 忽略上游不可解析的下载地址。 */
+        /* Ignore malformed download URLs returned by the provider. */
       }
     }
   }
@@ -166,7 +166,7 @@ export const executors: ProviderExecutors = defineApiKeyProviderExecutors("fxbao
 export const credentialValidators: CredentialValidators = {
   async apiKey(input) {
     requiredInputString(input.apiKey, "API Key");
-    return { profile: { displayName: "Fxbaogao API Key" }, grantedScopes: [], metadata: { apiBaseUrl: baseUrl } };
+    return { profile: { displayName: "Fxbaogao API Key" }, metadata: { apiBaseUrl: baseUrl } };
   },
 };
 export const proxy: ProviderProxyExecutor = defineProviderProxy({

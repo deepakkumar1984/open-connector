@@ -9,12 +9,14 @@ import { join } from "node:path";
 import { defaultLazySchemaCacheFiles } from "../catalog-lazy-schemas.ts";
 import { parseActionPolicyList } from "../core/action-policy.ts";
 import { parseEgressTrustedHosts, parsePrivateNetworkAccessFlag } from "../core/request.ts";
+import { readMcpOAuthClientMetadata } from "../custom-mcp/definition.ts";
 import { isConsoleShellRequest } from "./api/console-paths.ts";
 import { DEFAULT_OAUTH_CLOSE_DELAY_SECONDS, parseOAuthResultOrigins } from "./api/oauth-completion-page.ts";
 import { registerStaticRoutes } from "./api/static-routes.ts";
 import { resolveConnectionEventDispatcher } from "./connection-events.ts";
 import { createConnectorRuntime } from "./connector-runtime.ts";
 import { logger } from "./logger.ts";
+import { parseMcpOutputMode } from "./mcp-settings.ts";
 import { resolveServerAssets } from "./server-assets.ts";
 import { createDirectoryMigrationSource } from "./storage/migration-source.ts";
 import { migratePostgresRuntimeDatabase, sqliteMigrationsNotice } from "./storage/node-runtime-database.ts";
@@ -82,6 +84,7 @@ async function main(): Promise<void> {
     oauth: parseOAuthServerEnv(),
     trustProxyHeaders: parseOptionalBooleanFlag(process.env.OOMOL_CONNECT_OAUTH_TRUST_PROXY_HEADERS),
     eventVerifyToken: optionalEnv("OOMOL_CONNECT_EVENT_VERIFY_TOKEN"),
+    mcpOutputMode: parseMcpOutputMode(process.env.OOMOL_CONNECT_MCP_OUTPUT_MODE),
     jwt: {
       jwksUri: process.env.OOMOL_CONNECT_JWKS_URI,
       issuer: process.env.OOMOL_CONNECT_JWT_ISSUER,
@@ -101,6 +104,11 @@ async function main(): Promise<void> {
     },
     allowedCustomOAuth: parseActionPolicyList(process.env.OOMOL_CONNECT_ALLOWED_CUSTOM_OAUTH),
     oauthResultOrigins: parseOAuthResultOrigins(process.env.OOMOL_CONNECT_OAUTH_RESULT_ORIGINS),
+    customMcpOAuthClient: readMcpOAuthClientMetadata({
+      clientName: optionalEnv("OOMOL_CONNECT_CUSTOM_MCP_CLIENT_NAME"),
+      logoUri: optionalEnv("OOMOL_CONNECT_CUSTOM_MCP_CLIENT_LOGO_URI"),
+      clientUri: optionalEnv("OOMOL_CONNECT_CUSTOM_MCP_CLIENT_URI"),
+    }),
     postgres: databaseUrl
       ? {
           connectionString: databaseUrl,

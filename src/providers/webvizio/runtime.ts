@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { optionalRecord, optionalString, requiredString } from "../../core/cast.ts";
 import {
@@ -65,17 +64,13 @@ export async function validateWebvizioCredential(
       accountId: "webvizio-personal-access-token",
       displayName: "Webvizio Personal Access Token",
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: webvizioApiBaseUrl,
     },
   };
 }
 
-async function requestWebvizioJson(
-  input: WebvizioRequestInput,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
-): Promise<unknown> {
+async function requestWebvizioJson(input: WebvizioRequestInput, context: ApiKeyProviderContext): Promise<unknown> {
   const timeout = createProviderTimeout(context.signal);
   try {
     const response = await context.fetcher(buildWebvizioUrl(input.path), {

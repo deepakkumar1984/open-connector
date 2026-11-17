@@ -28,6 +28,7 @@ import { optionalString } from "./core/cast.ts";
 import { normalizeCredentialValues } from "./core/credential-fields.ts";
 import { apiKeyCredentialFields } from "./core/provider-setup.ts";
 import { CredentialResolver, isOAuthCredentialExpired } from "./credential-resolver.ts";
+import { readOAuthScopes } from "./oauth/oauth-scopes.ts";
 import {
   providerFetch,
   ProviderDispatchRequestError,
@@ -84,6 +85,8 @@ export interface ConnectionServiceOptions {
   store: IConnectionStore;
   logger?: RuntimeLogger;
   marketplace?: MarketplaceService;
+  /** Runs after local credentials have been saved. */
+  onConnected?: (summary: ConnectionSummary, credential: ResolvedCredential) => Promise<void>;
 }
 
 export interface DisconnectOptions {
@@ -161,6 +164,7 @@ export class ConnectionService {
   private readonly store: IConnectionStore;
   private readonly logger?: RuntimeLogger;
   private readonly marketplace?: MarketplaceService;
+  private readonly onConnected?: ConnectionServiceOptions["onConnected"];
 
   constructor(input: ConnectionServiceOptions) {
     this.providerHttpDispatch = input.providerHttpDispatch;
@@ -171,6 +175,7 @@ export class ConnectionService {
     this.credentials = new CredentialResolver(input);
     this.logger = input.logger;
     this.marketplace = input.marketplace;
+    this.onConnected = input.onConnected;
   }
 
   async listConnections(services?: ReadonlySet<string>): Promise<ConnectionSummary[]> {
@@ -397,6 +402,7 @@ export class ConnectionService {
     const values = normalizeCredentialValues({
       fields: auth.fields,
       values: input.values ?? {},
+      preserveSecrets: true,
       createError: (message) => new ConnectionError("invalid_input", message),
     });
     const credential: ResolvedCredential = {
@@ -426,6 +432,7 @@ export class ConnectionService {
     const stored = await this.store.setIfCurrentGeneration(service, connectionName, storedCredential, generation);
     if (!stored)
       throw new ConnectionError("connection_retired", "The connection was disconnected during authorization.");
+    await this.connectionSaved(stored.id);
     return this.createStoredConnectionSummary(
       this.getAvailableProvider(service),
       stored.id,
@@ -540,7 +547,22 @@ export class ConnectionService {
     const stored = expected
       ? await this.replaceCredential(expected, credential)
       : await this.store.set(provider.service, normalizeConnectionName(input.connectionName), credential);
+    await this.connectionSaved(stored.id);
     return this.createStoredConnectionSummary(provider, stored.id, stored.connectionName, credential);
+  }
+
+  /** Notify integrations only after a local connection has been durably saved. */
+  async connectionSaved(connectionId: string): Promise<void> {
+    if (!this.onConnected) return;
+    const stored = await this.getStoredConnection(connectionId);
+    if (stored.source === "saas" || stored.credential.authType === "no_auth") return;
+    const summary = this.createStoredConnectionSummary(
+      this.getProvider(stored.service),
+      stored.id,
+      stored.connectionName,
+      stored.credential,
+    );
+    await this.onConnected(summary, stored.credential);
   }
 
   private async replaceCredential(
@@ -942,8 +964,8 @@ export class ConnectionService {
     const grantedScopes =
       validation.profile?.grantedScopes ??
       validation.grantedScopes ??
-      parseScopeString(readLegacyString(validation.metadata, "scope")) ??
-      parseScopeString(readLegacyString(previous?.metadata, "scope")) ??
+      readOAuthScopes(validation.metadata?.scope) ??
+      readOAuthScopes(previous?.metadata.scope) ??
       previous?.profile.grantedScopes;
 
     return {
@@ -998,10 +1020,6 @@ export function normalizeConnectionName(value: string | undefined): string {
 
 function normalizeGrantedScopes(value: string[] | undefined): string[] {
   return [...new Set((value ?? []).map((scope) => scope.trim()).filter(Boolean))];
-}
-
-function parseScopeString(value: string | undefined): string[] | undefined {
-  return value ? value.split(/[,\s]+/) : undefined;
 }
 
 function readLegacyString(metadata: Record<string, unknown> | undefined, key: string): string | undefined {

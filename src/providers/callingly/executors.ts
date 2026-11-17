@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -89,7 +88,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: String(accountId ?? "callingly"),
         displayName: "Callingly API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: callinglyApiBaseUrl,
         validationEndpoint: "/v1/teams",
@@ -360,7 +358,7 @@ interface CallinglyRequestInput {
 
 async function callinglyRequestJson(
   input: CallinglyRequestInput,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: CallinglyPhase,
 ): Promise<unknown> {
   let response: Response;

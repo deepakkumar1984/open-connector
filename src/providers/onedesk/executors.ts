@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalBoolean, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -54,7 +53,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: organizationUri ?? organizationName,
         displayName: organizationName ?? organizationUri ?? "OneDesk API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: onedeskApiBaseUrl,
         validationEndpoint: organizationProfilePath,
@@ -126,7 +124,7 @@ async function getDetails(
 
 async function onedeskGetJson(input: {
   path: string;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: OnedeskRequestPhase;
 }): Promise<unknown> {
   let response: Response;

@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { compactObject, optionalRecord, optionalString, requiredRecord, requiredString } from "../../core/cast.ts";
@@ -16,7 +15,7 @@ type SquareActionHandler = (input: Record<string, unknown>, context: ApiKeyProvi
 interface SquareRequestInput {
   path: string;
   method: "GET" | "POST" | "PUT";
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: SquareRequestPhase;
   query?: Record<string, unknown>;
   body?: Record<string, unknown>;
@@ -118,7 +117,6 @@ export async function validateSquareCredential(
       accountId: merchantId ?? firstLocationId,
       displayName: businessName ?? firstLocationName ?? firstLocationId ?? "Square Access Token",
     },
-    grantedScopes: [],
     metadata: compactObject({
       apiBaseUrl: squareApiBaseUrl,
       validationEndpoint: "/v2/locations",

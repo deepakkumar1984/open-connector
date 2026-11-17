@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { optionalRawString, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -60,7 +59,6 @@ export async function validateLingvanexTranslationApiCredential(
       accountId: "lingvanex_translation_api:api-key",
       displayName: "Lingvanex Translation API Key",
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: lingvanexTranslationApiBaseUrl,
       validationEndpoint: `${translationPath}/languages`,
@@ -137,7 +135,7 @@ async function detectLanguage(input: Record<string, unknown>, context: ApiKeyPro
 
 async function listLanguages(
   input: Record<string, unknown>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: LingvanexPhase,
 ): Promise<{
   languages: Array<{ language: string; name: string | null; raw: Record<string, unknown> }>;
@@ -174,7 +172,7 @@ async function listLanguages(
 
 async function requestLingvanexJson(
   input: LingvanexRequestInput,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: LingvanexPhase,
 ): Promise<unknown> {
   const url = new URL(input.path, lingvanexTranslationApiBaseUrl);

@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -82,7 +81,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: optionalString(account?.uuid) ?? "riveter-api-key",
         displayName: accountName ?? apiKeyName ?? "Riveter API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         validationEndpoint: validationPath,
         accountUuid: optionalString(account?.uuid),
@@ -98,7 +96,7 @@ export const credentialValidators: CredentialValidators = {
 async function requestRiveterObject(input: {
   method: "GET" | "POST";
   path: string;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: "validate" | "execute";
   body?: Record<string, unknown>;
 }): Promise<Record<string, unknown>> {

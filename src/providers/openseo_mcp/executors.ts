@@ -34,7 +34,6 @@ export const credentialValidators: CredentialValidators = {
     const tools = await listMcpTools(connection({ apiKey: input.apiKey, fetcher, signal }));
     return {
       profile: { accountId: `openseo-mcp:${sha256Hex(input.apiKey.trim())}`, displayName: "OpenSEO MCP API Key" },
-      grantedScopes: [],
       metadata: { mcpEndpoint: endpoint, discoveredToolCount: tools.length },
     };
   },
@@ -60,7 +59,7 @@ export const proxy: ProviderProxyExecutor = defineProviderProxy({
     if (!headers.has("accept")) headers.set("accept", "application/json, text/event-stream");
   },
 });
-function connection(context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">) {
+function connection(context: ApiKeyProviderContext) {
   return {
     endpoint,
     service: "OpenSEO",

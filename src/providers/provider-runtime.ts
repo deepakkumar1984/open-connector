@@ -25,6 +25,12 @@ import { readBoundedResponseBytes } from "../core/request.ts";
  */
 export type ProviderFetch = typeof fetch;
 
+/** Transport dependencies for provider requests that do not need credentials. */
+export interface ProviderRequestContext {
+  fetcher: ProviderFetch;
+  signal?: AbortSignal;
+}
+
 export interface ProviderFetchOptions {
   /** Bind runtime policy; private targets still require the transport's allowPrivateNetwork opt-in. */
   network?: ProviderNetworkPolicy;
@@ -386,6 +392,20 @@ export async function readProviderJson<T>(response: Response, source: string): P
 
   const text = await readProviderErrorTextBody(response, `${source} error response`);
   throw new ProviderRequestError(response.status, text || `${source} request failed`);
+}
+
+/** Read a bounded error payload, preserving plain text and cancellation. */
+export async function readProviderErrorBody(
+  response: Response,
+  source: string,
+  signal?: AbortSignal,
+): Promise<unknown> {
+  const text = await readProviderErrorTextBody(response, `${source} error response`, signal);
+  return parseProviderJsonBodyText(text, {
+    emptyBody: {},
+    invalidJsonMessage: `${source} returned invalid JSON`,
+    invalidJsonFallback: (text) => text,
+  });
 }
 
 export interface ReadProviderJsonBodyOptions {

@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { compactObject, optionalNumber, optionalString, requiredString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -121,7 +120,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: "world-news-api-key",
         displayName: "World News API Key",
       },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/geo-coordinates",
         apiBaseUrl: worldNewsApiBaseUrl,
@@ -134,7 +132,7 @@ export const credentialValidators: CredentialValidators = {
 async function requestWorldNewsApiJson(
   path: string,
   query: Record<string, WorldNewsApiQueryValue>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: "validate" | "execute",
 ): Promise<unknown> {
   let response: Response;

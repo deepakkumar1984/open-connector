@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { createHash } from "node:crypto";
 import { base64Bytes, compactObject, optionalRecord, optionalScalarString, optionalString } from "../../core/cast.ts";
@@ -93,7 +92,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: `groqcloud:api_key:${createHash("sha256").update(input.apiKey).digest("hex").slice(0, 16)}`,
         displayName: "GroqCloud API Key",
       },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl: groqcloudApiBaseUrl,
         validationEndpoint: "/openai/v1/models",
@@ -104,7 +102,7 @@ export const credentialValidators: CredentialValidators = {
 };
 
 async function groqcloudRequest(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: GroqcloudRequestPhase;
   method?: "GET" | "POST";
   path: string;

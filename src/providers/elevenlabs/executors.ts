@@ -23,6 +23,7 @@ import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
 import { defineProviderProxy } from "../provider-proxy.ts";
 import {
   ProviderRequestError,
+  withRetryAfterSeconds,
   providerUserAgent,
   providerInputError,
   providerResponseError,
@@ -120,7 +121,6 @@ export async function validateElevenlabsApiKey(
           ? normalizedUser.firstName
           : `ElevenLabs ${normalizedUser.userId}`,
     },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: "/user",
       userId: normalizedUser.userId,
@@ -661,7 +661,7 @@ async function createElevenlabsError(response: Response, mode: "validate" | "exe
   const message = await readElevenlabsErrorMessage(response);
 
   if (response.status === 429) {
-    return new ProviderRequestError(429, message);
+    return new ProviderRequestError(429, message, withRetryAfterSeconds(response));
   }
   if (mode === "validate" && (response.status === 401 || response.status === 403)) {
     return providerInputError(message);

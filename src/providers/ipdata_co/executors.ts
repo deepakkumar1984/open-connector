@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalInteger, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -31,8 +30,7 @@ type IpdataScalarFieldName =
   | "emoji_flag"
   | "emoji_unicode"
   | "count";
-type IpdataActionContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
-type IpdataActionHandler = (input: Record<string, unknown>, context: IpdataActionContext) => Promise<unknown>;
+type IpdataActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 export const ipdataCoActionHandlers: ProviderActionHandlers<"ipdata_co", IpdataActionHandler> = {
   lookup_current_ip(_input, context) {
@@ -118,7 +116,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: "api_key",
         displayName: "ipdata API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         validationEndpoint: ipdataLookupPath,
         apiBaseUrl: ipdataMainApiBaseUrl,
@@ -138,7 +135,7 @@ function ipdataScalarHandler(fieldName: IpdataScalarFieldName): IpdataActionHand
 
 async function ipdataGetJson(
   baseUrl: string,
-  context: IpdataActionContext,
+  context: ApiKeyProviderContext,
   ip?: string,
   phase: IpdataRequestPhase = "execute",
 ): Promise<Record<string, unknown>> {
@@ -159,7 +156,7 @@ async function ipdataGetJson(
   return record;
 }
 
-async function ipdataPostJson(context: IpdataActionContext, ips: string[]): Promise<unknown[]> {
+async function ipdataPostJson(context: ApiKeyProviderContext, ips: string[]): Promise<unknown[]> {
   const payload = await requestIpdataJson(
     buildBulkLookupUrl(context.apiKey),
     {
@@ -181,7 +178,7 @@ async function ipdataPostJson(context: IpdataActionContext, ips: string[]): Prom
 }
 
 async function ipdataGetField(
-  context: IpdataActionContext,
+  context: ApiKeyProviderContext,
   fieldName: IpdataScalarFieldName | string,
   ip?: string,
 ): Promise<unknown> {

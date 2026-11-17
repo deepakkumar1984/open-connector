@@ -14,8 +14,7 @@ import { buildSorftimeMcpCall, normalizeSorftimeMcpResult, sorftimeMcpEndpoint }
 
 const service = "sorftime_mcp";
 const requestTimeoutMs = 60_000;
-type SorftimeContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
-type SorftimeHandler = (input: Record<string, unknown>, context: SorftimeContext) => Promise<unknown>;
+type SorftimeHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 const handlers: ProviderActionHandlers<"sorftime_mcp", SorftimeHandler> = mapProviderActionHandlers(
   service,
@@ -53,7 +52,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: `sorftime-mcp:${hash}`,
         displayName: `Sorftime MCP · ${hash.slice(-6)}`,
       },
-      grantedScopes: [],
       metadata: { mcpEndpoint: sorftimeMcpEndpoint, discoveredToolCount: tools.length },
     };
   },
@@ -76,7 +74,7 @@ export const proxy: ProviderProxyExecutor = defineProviderProxy({
   },
 });
 
-async function listTools(context: SorftimeContext): Promise<unknown[]> {
+async function listTools(context: ApiKeyProviderContext): Promise<unknown[]> {
   return withSorftimeClient(context, async (client) => {
     const result = await client.listTools({}, { timeout: requestTimeoutMs, signal: context.signal });
     return result.tools.map((tool) => ({
@@ -89,7 +87,7 @@ async function listTools(context: SorftimeContext): Promise<unknown[]> {
 }
 
 async function callTool(
-  context: SorftimeContext,
+  context: ApiKeyProviderContext,
   name: string,
   argumentsInput: Record<string, unknown>,
 ): Promise<unknown> {
@@ -98,7 +96,7 @@ async function callTool(
   );
 }
 
-function withSorftimeClient<T>(context: SorftimeContext, run: (client: Client) => Promise<T>): Promise<T> {
+function withSorftimeClient<T>(context: ApiKeyProviderContext, run: (client: Client) => Promise<T>): Promise<T> {
   return withMcpClient(
     {
       endpoint: new URL(sorftimeMcpEndpoint),

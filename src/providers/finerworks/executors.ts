@@ -1,4 +1,4 @@
-import type { CredentialValidators, ProviderProxyExecutor } from "../../core/types.ts";
+import type { ProviderExecutors, CredentialValidators, ProviderProxyExecutor } from "../../core/types.ts";
 import type { ProviderActionHandlers, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { requireApiKeyCredential } from "../provider-credentials.ts";
@@ -37,7 +37,7 @@ const handlers: ProviderActionHandlers<"finerworks", ProviderRuntimeHandler<Cont
   get_prices: (input, context) => request("/v3/get_prices", input, context),
 };
 
-export const executors: import("../../core/types.ts").ProviderExecutors = defineProviderExecutors<Context>({
+export const executors: ProviderExecutors = defineProviderExecutors<Context>({
   service: "finerworks",
   skipDnsValidation: true,
   async createContext(context, fetcher) {
@@ -70,7 +70,6 @@ export const credentialValidators: CredentialValidators = {
     await request("/v3/list_product_types", {}, { webApiKey: input.apiKey, appKey, fetcher, signal });
     return {
       profile: { accountId: "api_key", displayName: "FinerWorks API Account" },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl: "https://v2.api.finerworks.com",
         validationEndpoint: "/v3/list_product_types",

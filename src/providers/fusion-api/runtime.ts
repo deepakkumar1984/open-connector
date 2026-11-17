@@ -6,11 +6,12 @@ import { optionalRecord, optionalString } from "../../core/cast.ts";
 import { compactJson, encodePathSegment } from "../../core/request.ts";
 import { mapProviderActionHandlers } from "../provider-executors.ts";
 import {
-  createProviderTimeout,
-  isAbortLikeError,
   ProviderRequestError,
-  providerUserAgent,
+  createProviderTimeout,
   defaultProviderRequestTimeoutMs,
+  isAbortLikeError,
+  providerUserAgent,
+  withRetryAfterSeconds,
 } from "../provider-runtime.ts";
 import { fusionApiOperations } from "./operations.ts";
 
@@ -68,7 +69,6 @@ export async function validateFusionApiCredential(
       accountId: "oomol-api-key",
       displayName: "OOMOL API Key",
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: fusionApiDefaultBaseUrl,
       validationEndpoint: fusionApiValidationPath,
@@ -88,6 +88,7 @@ async function executeFusionApiOperation(
       query: operation.method === "GET" ? buildFusionApiQuery(operation, input) : undefined,
       body: operation.method === "POST" ? buildFusionApiRequestBody(operation, input) : undefined,
       successStatuses: operation.successStatuses,
+      taskRead: operation.actionName.endsWith("_state") || operation.actionName.endsWith("_result"),
     }),
   );
 }
@@ -102,6 +103,7 @@ interface FusionApiRequest {
   method: "GET" | "POST";
   path: string;
   successStatuses: number[];
+  taskRead?: boolean;
   query?: URLSearchParams;
   body?: unknown;
 }
@@ -114,9 +116,12 @@ async function fusionApiRequest(context: FusionApiRequestContext, request: Fusio
     }
   }
 
-  const requestTimeoutMs = fusionApiLongRunningPaths.has(request.path)
-    ? fusionApiLongRunningRequestTimeoutMs
-    : defaultProviderRequestTimeoutMs;
+  const requestTimeoutMs =
+    request.path === "/v1/jina-reader/action/search"
+      ? 60_000
+      : fusionApiLongRunningPaths.has(request.path)
+        ? fusionApiLongRunningRequestTimeoutMs
+        : defaultProviderRequestTimeoutMs;
   const timeout = createProviderTimeout(context.signal, requestTimeoutMs);
   let response: Response;
   try {
@@ -151,7 +156,16 @@ async function fusionApiRequest(context: FusionApiRequestContext, request: Fusio
   ) {
     throw new ProviderRequestError(400, error.message, undefined, "invalid_input");
   }
-  throw new ProviderRequestError(response.status, error.message, undefined, "provider_error");
+  if (request.taskRead && response.status >= 500 && error.state === "error") {
+    return { state: "failed", error: error.message };
+  }
+
+  throw new ProviderRequestError(
+    response.status,
+    error.message,
+    withRetryAfterSeconds(response),
+    response.status === 429 ? "rate_limited" : "provider_error",
+  );
 }
 
 function buildFusionApiPath(operation: FusionApiOperation, input: Record<string, unknown>): string {

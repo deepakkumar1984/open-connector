@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 import type { ProviderFetch } from "../provider-runtime.ts";
 
 import { optionalRecord, optionalString, requiredRecord, requiredString } from "../../core/cast.ts";
@@ -118,9 +117,7 @@ export async function validateCiscoMerakiCredential(
     profile: {
       accountId: firstOrganizationId,
       displayName: firstOrganizationName ? `Cisco Meraki: ${firstOrganizationName}` : "Cisco Meraki API Key",
-      grantedScopes: [],
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: ciscoMerakiApiBaseUrl,
       validationEndpoint: "/organizations?perPage=3",
@@ -131,7 +128,7 @@ export async function validateCiscoMerakiCredential(
 
 async function requestCiscoMerakiList(
   request: CiscoMerakiRequest,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: CiscoMerakiRequestPhase,
 ): Promise<CiscoMerakiListResult> {
   const response = await requestCiscoMerakiResponse(request, context);
@@ -150,7 +147,7 @@ async function requestCiscoMerakiList(
 
 async function requestCiscoMeraki(
   request: CiscoMerakiRequest,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: CiscoMerakiRequestPhase,
 ): Promise<unknown> {
   const response = await requestCiscoMerakiResponse(request, context);
@@ -163,7 +160,7 @@ async function requestCiscoMeraki(
 
 async function requestCiscoMerakiResponse(
   request: CiscoMerakiRequest,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
 ): Promise<Response> {
   const url = new URL(request.path.startsWith("/") ? request.path.slice(1) : request.path, `${ciscoMerakiApiBaseUrl}/`);
   for (const [key, value] of request.search ?? []) {

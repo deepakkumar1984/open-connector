@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { compactObject, optionalBoolean, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -115,7 +114,6 @@ export async function validateYGyCredential(
   );
   return {
     profile: { accountId: "y_gy", displayName: "Y.GY API Key" },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: yGyApiBaseUrl,
       validationEndpoint: "/link?limit=1&offset=0",
@@ -168,7 +166,7 @@ function updateLinkBody(input: Record<string, unknown>): Record<string, unknown>
 }
 
 async function requestYGyJson(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   input: {
     path: string;
     method?: Exclude<YGyMethod, "DELETE">;
@@ -192,7 +190,7 @@ async function requestYGyJson(
 }
 
 async function requestYGy(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   input: {
     path: string;
     method?: YGyMethod;

@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { Buffer } from "node:buffer";
 import {
@@ -172,9 +171,7 @@ export async function validateRecurlyCredential(
     profile: {
       accountId: siteId ? `recurly:${siteId}` : "recurly",
       displayName: siteId ? `Recurly ${siteId}` : "Recurly API Key",
-      grantedScopes: [],
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: recurlyApiBaseUrl,
       validationEndpoint: "/accounts?limit=1",
@@ -210,7 +207,7 @@ async function requestRecurlyList(
 
 async function requestRecurlyJson(input: {
   path: string;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   mode: "validate" | "execute";
   method?: string;
   query?: Record<string, RecurlyQueryValue>;

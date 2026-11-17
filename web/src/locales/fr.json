@@ -424,7 +424,14 @@
       "failed": "Échec de l’enregistrement du client OAuth.",
       "resetting": "Réinitialisation du client OAuth...",
       "reset": "Client OAuth réinitialisé.",
-      "resetFailed": "Échec de la réinitialisation du client OAuth."
+      "resetFailed": "Échec de la réinitialisation du client OAuth.",
+      "useDefaultScopes": "Utiliser les autorisations par défaut",
+      "scopeLabel": "Autorisations OAuth",
+      "emptyScopes": "Seules les autorisations de base nécessaires à la connexion seront demandées.",
+      "removeScope": "Retirer {{scope}}",
+      "scopePlaceholder": "Ajouter un scope",
+      "additionalScopes": "Autorisations supplémentaires",
+      "advancedScopes": "Paramètres avancés"
     },
     "execution": {
       "executable": "Exécutable",
@@ -919,5 +926,39 @@
       "auth_error": "Clé du projet invalide"
     },
     "retry": "Vérifier à nouveau"
+  },
+  "customMcp": {
+    "service": "Identifiant du service",
+    "serviceHelp": "Lettres minuscules, chiffres, tirets ou traits de soulignement. Non modifiable après la création.",
+    "add": "Ajouter un service MCP",
+    "description": "Connectez un serveur MCP distant pour découvrir ses outils.",
+    "name": "Nom",
+    "endpoint": "Adresse MCP",
+    "transport": "Mode de transport",
+    "auth": "Authentification",
+    "noAuth": "Sans authentification",
+    "headers": "Clé API / En-têtes",
+    "headerHelp": "Définissez les en-têtes ici. Saisissez leurs valeurs lors de la création de la connexion.",
+    "headerName": "Nom de l’en-tête",
+    "prefix": "Préfixe (facultatif)",
+    "removeHeader": "Supprimer l’en-tête",
+    "addHeader": "Ajouter un en-tête",
+    "oauthHelp": "Laissez Client ID vide pour une inscription automatique. Autorisez votre compte après l’ajout du service.",
+    "manualOAuth": "Configurer les points OAuth manuellement",
+    "issuer": "URL du serveur d’autorisation",
+    "authorizationUrl": "Point d’autorisation",
+    "tokenUrl": "Point de jeton",
+    "scopes": "Portées (séparées par des espaces)",
+    "working": "Connexion…",
+    "settings": "Service MCP",
+    "save": "Enregistrer",
+    "syncConnection": "Connexion pour découvrir les outils",
+    "synced": "{{count}} outils, dernière synchronisation {{time}}",
+    "notSynced": "Connectez un compte pour découvrir les outils.",
+    "syncFailed": "Échec de la découverte. Vérifiez la connexion et l’adresse, puis réessayez.",
+    "sync": "Synchroniser les outils",
+    "disable": "Désactiver",
+    "enable": "Activer",
+    "delete": "Supprimer le service"
   }
 }

@@ -21,7 +21,6 @@ const apiBaseUrl = "https://cloudgpu.app/v1";
 const inferenceTimeoutMs = 300_000;
 
 type ActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
-type RequestContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
 
 interface CloudgpuRequest {
   path: "/models" | "/chat/completions" | "/gpu/account";
@@ -58,13 +57,12 @@ export const credentialValidators: CredentialValidators = {
     await requestCloudgpu({ path: "/gpu/account" }, { apiKey: input.apiKey, fetcher, signal });
     return {
       profile: { displayName: "CloudGPU API Key" },
-      grantedScopes: [],
       metadata: { validationEndpoint: "/gpu/account" },
     };
   },
 };
 
-function requestCloudgpu(input: CloudgpuRequest, context: RequestContext): Promise<Record<string, unknown>> {
+function requestCloudgpu(input: CloudgpuRequest, context: ApiKeyProviderContext): Promise<Record<string, unknown>> {
   return runProviderRequest(
     {
       signal: context.signal,

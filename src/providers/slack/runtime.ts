@@ -14,6 +14,7 @@ import {
   requiredString,
 } from "../../core/cast.ts";
 import { assertPublicHttpUrl, readBoundedResponseBytes, storeResponseInTransit } from "../../core/request.ts";
+import { readOAuthScopes } from "../../oauth/oauth-scopes.ts";
 import { defineProviderExecutors } from "../provider-executors.ts";
 import {
   createProviderTimeout,
@@ -204,7 +205,7 @@ export const slackCredentialValidators: CredentialValidators = {
 
     return {
       profile: slackCredentialProfile(payload),
-      grantedScopes: responseScopes.length > 0 ? responseScopes : input.profile.grantedScopes,
+      grantedScopes: responseScopes ?? input.profile.grantedScopes,
       metadata: {
         currentAccount: payload,
       },
@@ -582,16 +583,15 @@ async function slackListUsers(input: Record<string, unknown>, context: SlackActi
     url.searchParams.set("include_locale", String(input.includeLocale));
   }
 
-  const payload = await slackGetJson<{
-    ok: boolean;
-    members?: Array<Record<string, unknown>>;
-    response_metadata?: { next_cursor?: string };
-    error?: string;
-  }>(url, context);
+  const payload = await slackGetJson<SlackPayloadError & { members?: unknown }>(url, context);
 
   return {
-    users: (payload.members ?? []).map((member) => normalizeUser(member)),
-    nextCursor: normalizeNextCursor(payload.response_metadata?.next_cursor),
+    users: requireSlackArray(payload.members, "users.list members").map((member) => {
+      const row = requiredResponseRecord(member, "users.list member");
+      requireSlackId(row.id, "users.list member id");
+      return normalizeUser(row);
+    }),
+    nextCursor: normalizeNextCursor(readSlackNextCursor(payload, "users.list")),
   };
 }
 
@@ -1089,13 +1089,6 @@ function normalizeNextCursor(cursor: string | undefined): string | null {
   return cursor ? cursor : null;
 }
 
-function readSlackScopes(value: unknown): string[] {
-  return (optionalString(value) ?? "")
-    .split(",")
-    .map((scope) => scope.trim())
-    .filter(Boolean);
-}
-
 function readSlackTokenKind(accessToken: string, metadata: Record<string, unknown>): SlackOAuthTokenKind | undefined {
   const rawTokenType = metadata.rawTokenType;
   if (rawTokenType == "bot") {
@@ -1113,19 +1106,18 @@ function readSlackTokenKind(accessToken: string, metadata: Record<string, unknow
   return undefined;
 }
 
-function readSlackCredentialScopes(accessToken: string, metadata: Record<string, unknown>): string[] {
+function readSlackCredentialScopes(accessToken: string, metadata: Record<string, unknown>): string[] | undefined {
   switch (readSlackTokenKind(accessToken, metadata)) {
-    case "user":
-      return uniqueSlackScopes(readSlackScopes(optionalRecord(metadata.authed_user)?.scope ?? metadata.scope));
+    case "user": {
+      const user = optionalRecord(metadata.authed_user);
+      const scope = user ? user.scope : metadata.scope;
+      return readOAuthScopes(scope);
+    }
     case "bot":
-      return uniqueSlackScopes(readSlackScopes(metadata.scope));
+      return readOAuthScopes(metadata.scope);
     default:
-      return [];
+      return undefined;
   }
-}
-
-function uniqueSlackScopes(scopes: string[]): string[] {
-  return [...new Set(scopes)];
 }
 
 function normalizeScheduledPostAt(value: number | string | undefined, fallback: number): number {

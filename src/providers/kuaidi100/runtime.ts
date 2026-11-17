@@ -43,7 +43,6 @@ export async function validateKuaidi100Credential(
   const hash = createHash("sha256").update(apiKey).digest("hex").slice(0, 16);
   return {
     profile: { accountId: `kuaidi100:mcp:${hash}`, displayName: `Kuaidi100 · ${hash.slice(-6)}` },
-    grantedScopes: [],
     metadata: { mcpEndpoint: kuaidi100McpEndpoint, discoveredToolCount: result.tools.length },
   };
 }
@@ -163,7 +162,7 @@ function normalizeKuaidi100Output(value: unknown): Record<string, unknown> {
 }
 
 function withKuaidi100Client<T>(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: Kuaidi100Phase,
   run: (client: Client) => Promise<T>,
 ): Promise<T> {

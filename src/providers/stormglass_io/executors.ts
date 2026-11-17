@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, objectArray, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -58,7 +57,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: "stormglass_io",
         displayName: "Stormglass API Key",
       },
-      grantedScopes: [],
       metadata: {
         validationEndpoint: "/v2/weather/point",
         apiBaseUrl: stormglassApiBaseUrl,
@@ -75,7 +73,7 @@ export const credentialValidators: CredentialValidators = {
 
 async function executeWeatherPoint(
   input: Record<string, unknown>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: StormglassPhase,
 ): Promise<Record<string, unknown>> {
   const payload = await stormglassJsonRequest("/v2/weather/point", buildWeatherPointQuery(input), context, phase);
@@ -87,7 +85,7 @@ async function executeWeatherPoint(
 
 async function executeTideExtremes(
   input: Record<string, unknown>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
 ): Promise<Record<string, unknown>> {
   const payload = await stormglassJsonRequest(
     "/v2/tide/extremes/point",
@@ -103,7 +101,7 @@ async function executeTideExtremes(
 
 async function executeTideSeaLevel(
   input: Record<string, unknown>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
 ): Promise<Record<string, unknown>> {
   const payload = await stormglassJsonRequest(
     "/v2/tide/sea-level/point",
@@ -120,7 +118,7 @@ async function executeTideSeaLevel(
 async function stormglassJsonRequest(
   path: string,
   query: Record<string, string | number | undefined>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: StormglassPhase,
 ): Promise<Record<string, unknown>> {
   const url = new URL(path, stormglassApiBaseUrl);

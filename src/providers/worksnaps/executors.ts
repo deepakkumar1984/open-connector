@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { Buffer } from "node:buffer";
 import { compactObject, optionalString } from "../../core/cast.ts";
@@ -202,7 +201,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: user.id === undefined ? "worksnaps-api-token" : String(user.id),
         displayName: buildUserLabel(user) ?? "Worksnaps API Token",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: worksnapsApiBaseUrl,
         validationEndpoint: worksnapsValidationPath,
@@ -218,7 +216,7 @@ export const credentialValidators: CredentialValidators = {
 
 async function requestWorksnapsXml(input: {
   path: string;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: "validate" | "execute";
   query?: Record<string, string | undefined>;
 }): Promise<XmlNode> {

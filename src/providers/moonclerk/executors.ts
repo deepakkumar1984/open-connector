@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { optionalRecord, optionalString } from "../../core/cast.ts";
 import { queryParams } from "../../core/request.ts";
@@ -133,7 +132,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: `moonclerk:${input.apiKey.slice(-6)}`,
         displayName: "MoonClerk API Key",
       },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl: moonclerkApiBaseUrl,
         validationEndpoint: "/forms?count=1",
@@ -145,7 +143,7 @@ export const credentialValidators: CredentialValidators = {
 
 async function requestMoonclerk(input: {
   path: string;
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   phase: MoonclerkRequestPhase;
   query?: Record<string, string>;
 }): Promise<unknown> {

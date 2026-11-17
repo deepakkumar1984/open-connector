@@ -1,6 +1,5 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import { compactObject, optionalBoolean, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -123,7 +122,6 @@ export async function validateExpofpCredential(
       accountId: "expofp:api-token",
       displayName: firstExpo ? `ExpoFP ${firstExpo.name}` : "ExpoFP API Token",
     },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: "/list-events",
       apiBaseUrl: expofpApiBaseUrl,
@@ -137,7 +135,7 @@ export async function validateExpofpCredential(
 async function requestExpofpJson(
   path: string,
   payload: Record<string, unknown>,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   phase: ExpofpPhase,
 ): Promise<unknown> {
   return runProviderRequest({ signal: context.signal, label: "ExpoFP" }, async (signal) => {

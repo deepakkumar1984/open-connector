@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { createHash } from "node:crypto";
 import { compactObject, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
@@ -98,9 +97,7 @@ async function validateReplyIoCredential(
           ? `reply_io:key:${createHash("sha256").update(apiKey).digest("hex").slice(0, 16)}`
           : `reply_io:user:${userId}`,
       displayName: username ?? (userId === undefined ? "Reply.io API Key" : `Reply.io ${userId}`),
-      grantedScopes: [],
     },
-    grantedScopes: [],
     metadata: compactObject({
       apiBaseUrl: replyIoApiBaseUrl,
       validationEndpoint: "/v3/whoami",
@@ -121,7 +118,7 @@ function createReplyIoUrl(path: string, query: Record<string, unknown> = {}): UR
 }
 
 async function requestReplyIo(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   request: {
     method: string;
     path?: string;

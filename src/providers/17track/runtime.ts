@@ -1,6 +1,6 @@
 import type { CredentialValidationResult } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderRequestContext } from "../provider-runtime.ts";
 
 import { compactObject, optionalNumber, optionalRecord, optionalString } from "../../core/cast.ts";
 import {
@@ -37,6 +37,30 @@ export const seventeenTrackActionHandlers: ProviderActionHandlers<
   },
   get_quota: async (_input, context) =>
     normalizeQuotaResponse(await requestSeventeenTrack("getquota", [], context.apiKey, context, "execute")),
+  change_carrier: async (input, context) =>
+    normalizeBatchResponse(
+      await requestSeventeenTrack("changecarrier", input.carrier_changes, context.apiKey, context, "execute"),
+    ),
+  update_tracking_info: async (input, context) =>
+    normalizeBatchResponse(
+      await requestSeventeenTrack("changeinfo", input.trackings, context.apiKey, context, "execute"),
+    ),
+  stop_tracking: async (input, context) =>
+    normalizeBatchResponse(
+      await requestSeventeenTrack("stoptrack", input.trackings, context.apiKey, context, "execute"),
+    ),
+  restart_tracking: async (input, context) =>
+    normalizeBatchResponse(await requestSeventeenTrack("retrack", input.trackings, context.apiKey, context, "execute")),
+  delete_trackings: async (input, context) =>
+    normalizeBatchResponse(
+      await requestSeventeenTrack("deletetrack", input.trackings, context.apiKey, context, "execute"),
+    ),
+  push_trackings: async (input, context) =>
+    normalizeBatchResponse(await requestSeventeenTrack("push", input.trackings, context.apiKey, context, "execute")),
+  get_realtime_tracking_details: async (input, context) =>
+    normalizeBatchResponse(
+      await requestSeventeenTrack("getRealTimeTrackInfo", [input.tracking], context.apiKey, context, "execute"),
+    ),
 };
 
 export async function validateSeventeenTrackCredential(
@@ -50,7 +74,6 @@ export async function validateSeventeenTrackCredential(
 
   return {
     profile: { displayName: "17TRACK API Key" },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: seventeenTrackApiBaseUrl,
       validationEndpoint: "/getquota",
@@ -64,7 +87,7 @@ async function requestSeventeenTrack(
   path: string,
   body: unknown,
   apiKey: string,
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">,
+  context: ProviderRequestContext,
   phase: "validate" | "execute",
 ) {
   const timeout = createProviderTimeout(context.signal);
@@ -181,9 +204,11 @@ function createHttpError(response: Response, payload: unknown, phase: "validate"
   if (response.status === 429) {
     return new ProviderRequestError(429, message);
   }
-  if (response.status === 401 || response.status === 403) {
-    return new ProviderRequestError(phase === "validate" ? 400 : response.status, message);
-  }
+  const data = optionalRecord(optionalRecord(payload)?.data);
+  const firstError = optionalRecord(Array.isArray(data?.errors) ? data.errors[0] : undefined);
+  if (optionalNumber(firstError?.code) === -18010002) return createEmbeddedError(-18010002, message, phase);
+  if (response.status === 401 || response.status === 403)
+    return new ProviderRequestError(response.status, message, undefined, "provider_error");
   if (response.status === 400 || response.status === 422) {
     return new ProviderRequestError(response.status, message);
   }
@@ -192,13 +217,13 @@ function createHttpError(response: Response, payload: unknown, phase: "validate"
 
 function createEmbeddedError(code: number, message: string | undefined, phase: "validate" | "execute") {
   const detail = message ?? `17TRACK API returned error ${code}`;
-  if ([-18010001, -18010002, -18010004, -18010005].includes(code)) {
+  if (code === -18010002) {
     return new ProviderRequestError(phase === "validate" ? 400 : 401, detail);
   }
   if (code === -18019907 || code === -18019908) {
     return new ProviderRequestError(429, detail);
   }
-  if (code === -18010003 || [-18019815, -18019816, -18019817].includes(code)) {
+  if ([-18010001, -18010003, -18010004, -18010005, -18019815, -18019816, -18019817].includes(code)) {
     return providerResponseError(detail);
   }
   return providerInputError(detail);

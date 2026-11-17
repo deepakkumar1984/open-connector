@@ -144,9 +144,7 @@ export async function validateRecallAiCredential(
     profile: {
       accountId: buildRecallAiAccountId(apiKey, region),
       displayName: `Recall.ai API Key (${region})`,
-      grantedScopes: [],
     },
-    grantedScopes: [],
     metadata: {
       region,
       apiBaseUrl,
@@ -165,7 +163,7 @@ export const credentialValidators: CredentialValidators = {
 
 async function requestRecallAi(input: {
   path: string;
-  context: Pick<RecallAiContext, "apiKey" | "apiBaseUrl" | "fetcher" | "signal">;
+  context: RecallAiContext;
   mode: "validate" | "execute";
   method?: "GET" | "POST";
   body?: Record<string, unknown>;

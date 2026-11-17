@@ -4,8 +4,7 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext, ProviderRuntimeHandler } from "../provider-executors.ts";
 
 import {
   compactObject,
@@ -153,7 +152,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: "revenuecat-api-key",
         displayName: "RevenueCat API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: revenueCatApiBaseUrl,
         apiVersion: "v2",
@@ -202,7 +200,7 @@ async function getRevenueCatResource(
 
 async function requestRevenueCat(
   path: string,
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   query: Record<string, RevenueCatQueryValue>,
   phase: RevenueCatPhase,
 ): Promise<unknown> {

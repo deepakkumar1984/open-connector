@@ -64,7 +64,6 @@ export async function validateWisburgCredential(
       accountId: `wisburg:${sha256Hex(input.apiKey).slice(0, 32)}`,
       displayName: "Wisburg API Key",
     },
-    grantedScopes: [],
     metadata: {
       apiBaseUrl: wisburgApiBaseUrl,
       validationEndpoint: "/api/feed",
@@ -116,7 +115,7 @@ async function getWisburgResource(
 }
 
 async function wisburgRequest(
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">,
+  context: ApiKeyProviderContext,
   input: WisburgRequestInput,
 ): Promise<Record<string, unknown>> {
   return runProviderRequest({ signal: context.signal, label: "Wisburg" }, async (signal) => {

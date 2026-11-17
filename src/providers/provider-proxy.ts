@@ -9,7 +9,7 @@ import type {
 
 import { Buffer } from "node:buffer";
 import { optionalRecord, optionalScalarString, optionalString, requiredString } from "../core/cast.ts";
-import { readBoundedResponseBytes } from "../core/request.ts";
+import { hasPathTraversalSegment, readBoundedResponseBytes } from "../core/request.ts";
 import {
   requireApiKeyCredential,
   requireOAuthCredential,
@@ -109,6 +109,8 @@ export interface ProviderProxyDefinition {
   allowPrivateNetwork?: () => boolean;
   /** Skip the redundant DNS resolved-address check; only for hardcoded-base-URL proxies. */
   skipDnsValidation?: boolean;
+  /** Per-connection base transport, e.g. a client trusting a connection-supplied CA certificate. */
+  transport?: (context: ExecutionContext) => Promise<typeof fetch | undefined>;
   /** Deliberate provider-specific timeout override; defaults to the shared 30-second budget. */
   timeoutMs?: number;
   /** Native redirect policy override; guarded manual following remains the default. */
@@ -174,20 +176,6 @@ export function normalizeProviderProxyEndpoint(endpointInput: unknown, allowedOr
     throw new ProviderRequestError(400, "endpoint must not contain path traversal segments");
   }
   return endpoint;
-}
-
-function hasPathTraversalSegment(endpoint: string): boolean {
-  const path = endpoint.split(/[?#]/u)[0]!;
-  for (const segment of path.split("/")) {
-    try {
-      if (decodeURIComponent(segment) === "..") {
-        return true;
-      }
-    } catch {
-      return true;
-    }
-  }
-  return false;
 }
 
 export function normalizeProviderProxyQuery(queryInput: unknown): Record<string, string> {
@@ -333,13 +321,18 @@ export function defineProviderProxy(input: ProviderProxyDefinition): ProviderPro
         ? [input.auth.name]
         : undefined;
   const additionalSensitiveHeaders = [...(authSensitiveHeaders ?? []), ...(input.sensitiveHeaders ?? [])];
-  const egressFetch = createProviderFetch({
-    allowPrivateNetwork: input.allowPrivateNetwork,
-    skipDnsValidation: input.skipDnsValidation,
-    additionalSensitiveHeaders: additionalSensitiveHeaders.length > 0 ? additionalSensitiveHeaders : undefined,
-  });
+  const createEgressFetch = (transport?: typeof fetch): typeof fetch =>
+    createProviderFetch({
+      fetch: transport,
+      allowPrivateNetwork: input.allowPrivateNetwork,
+      skipDnsValidation: input.skipDnsValidation,
+      additionalSensitiveHeaders: additionalSensitiveHeaders.length > 0 ? additionalSensitiveHeaders : undefined,
+    });
+  const defaultEgressFetch = createEgressFetch();
   return async (proxyInput: ProxyRequestInput, context: ExecutionContext): Promise<ProxyExecutionResult> => {
     try {
+      const transport = await input.transport?.(context);
+      const egressFetch = transport ? createEgressFetch(transport) : defaultEgressFetch;
       const baseUrl = await resolveProviderProxyBaseUrl(input.baseUrl, context, input.service);
       const endpointOrigins = [baseUrl, ...(input.allowedOrigins ?? [])];
       const endpoint = normalizeProviderProxyEndpoint(proxyInput.endpoint, endpointOrigins);

@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { compactObject, optionalBoolean, optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
 import { requireApiKeyCredential } from "../provider-credentials.ts";
@@ -16,7 +15,7 @@ type QueryValue = string | number | boolean | undefined;
 type AutoboundActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 interface AutoboundRequestInput {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   method?: "GET" | "POST";
   query?: Record<string, QueryValue>;
@@ -191,7 +190,6 @@ export const credentialValidators: CredentialValidators = {
         displayName:
           optionalString(account.customerName) ?? optionalString(account.customerId) ?? "Autobound Signal API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: autoboundApiBaseUrl,
         validationEndpoint: "/v1/account",

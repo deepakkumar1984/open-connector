@@ -1,6 +1,5 @@
 import type { CredentialValidators, ProviderExecutors, ProviderProxyExecutor } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
 
 import { Buffer } from "node:buffer";
 import { optionalInteger, optionalRecord, optionalString } from "../../core/cast.ts";
@@ -91,7 +90,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: userId !== undefined ? `greenhouse:user:${userId}` : "greenhouse-harvest-api-key",
         displayName: readFirstUserName(users) ?? "Greenhouse Harvest API",
       },
-      grantedScopes: [],
       metadata: {
         apiBaseUrl: greenhouseBaseUrl,
         validationEndpoint: validationPath,
@@ -175,7 +173,7 @@ function buildListQuery(input: Record<string, unknown>): Record<string, string |
 }
 
 async function requestGreenhouseJson(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   phase: GreenhouseRequestPhase;
   method?: string;
@@ -188,7 +186,7 @@ async function requestGreenhouseJson(input: {
 }
 
 async function requestGreenhouse(input: {
-  context: Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
+  context: ApiKeyProviderContext;
   path: string;
   phase: GreenhouseRequestPhase;
   method?: string;

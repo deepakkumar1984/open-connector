@@ -591,7 +591,6 @@ export async function validateMailtrapCredential(
       accountId: selectedAccountId === undefined ? "mailtrap" : String(selectedAccountId),
       displayName: selectedAccountName ?? "Mailtrap API Token",
     },
-    grantedScopes: [],
     metadata: compactObject({
       apiBaseUrl: mailtrapApiBaseUrl,
       validationEndpoint: "/api/accounts",
@@ -742,10 +741,7 @@ async function getStatsArray(
   };
 }
 
-async function listMailtrapAccounts(
-  context: Pick<MailtrapActionContext, "apiKey" | "fetcher" | "signal">,
-  phase: MailtrapPhase,
-) {
+async function listMailtrapAccounts(context: MailtrapActionContext, phase: MailtrapPhase) {
   return requestMailtrapResourceArray({
     ...context,
     path: "/api/accounts",

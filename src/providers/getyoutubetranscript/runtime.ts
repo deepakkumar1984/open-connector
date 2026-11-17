@@ -14,8 +14,7 @@ import {
 export const getyoutubetranscriptApiBaseUrl = "https://getyoutubetranscript.com/api/v1";
 
 type RequestPhase = "validate" | "execute";
-type ActionContext = Pick<ApiKeyProviderContext, "apiKey" | "fetcher" | "signal">;
-type ActionHandler = (input: Record<string, unknown>, context: ActionContext) => Promise<unknown>;
+type ActionHandler = (input: Record<string, unknown>, context: ApiKeyProviderContext) => Promise<unknown>;
 
 export const getyoutubetranscriptActionHandlers: ProviderActionHandlers<"getyoutubetranscript", ActionHandler> = {
   get_credits(_input, context) {
@@ -72,7 +71,6 @@ export async function validateGetyoutubetranscriptCredential(
     profile: {
       displayName: plan ? `GetYouTubeTranscript (${plan} plan)` : "GetYouTubeTranscript API Key",
     },
-    grantedScopes: [],
     metadata: compactObject({
       validationEndpoint: "/credits",
       apiBaseUrl: getyoutubetranscriptApiBaseUrl,
@@ -87,7 +85,7 @@ export async function validateGetyoutubetranscriptCredential(
 async function apiGet(
   path: string,
   query: Record<string, unknown>,
-  context: ActionContext,
+  context: ApiKeyProviderContext,
   phase: RequestPhase,
 ): Promise<unknown> {
   const url = new URL(`${getyoutubetranscriptApiBaseUrl}${path}`);

@@ -4,8 +4,8 @@ import type {
   ProviderExecutors,
   ProviderProxyExecutor,
 } from "../../core/types.ts";
-import type { ProviderActionHandlers } from "../provider-executors.ts";
-import type { ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderActionHandlers, ApiKeyProviderContext } from "../provider-executors.ts";
+import type { ProviderRequestContext } from "../provider-runtime.ts";
 
 import { compactObject, optionalRecord, optionalString } from "../../core/cast.ts";
 import { defineApiKeyProviderExecutors } from "../provider-executors.ts";
@@ -135,7 +135,6 @@ export const credentialValidators: CredentialValidators = {
         accountId: workspaceId ? `teamcamp:${workspaceId}` : undefined,
         displayName: workspaceName ?? email ?? createdBy ?? "Teamcamp API Key",
       },
-      grantedScopes: [],
       metadata: compactObject({
         apiBaseUrl: teamcampApiBaseUrl,
         validationEndpoint: "/verify",
@@ -152,7 +151,7 @@ export const credentialValidators: CredentialValidators = {
 async function requestTeamcampJson<T>(options: {
   apiKey: string;
   path: string;
-  context: Pick<ApiKeyProviderContext, "fetcher" | "signal">;
+  context: ProviderRequestContext;
   phase: TeamcampRequestPhase;
   method?: string;
   query?: Record<string, TeamcampQueryValue>;
